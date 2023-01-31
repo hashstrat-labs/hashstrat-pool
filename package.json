@@ -1,0 +1,45 @@
+{
+  "name": "hashstrat-pool",
+  "version": "0.0.1",
+  "description": "Pool contracts of the  HashStratp protocol",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "clean": "npx hardhat clean",
+    "chain": "npx hardhat node",
+    "flatten": "npx hardhat flatten",
+    "test": "npx hardhat test",
+    "deploy:polygon": "npx hardhat run --network polygon scripts/deploy-polygon.ts",
+    "verify:polygon": "npx hardhat verify --network polygon <POOL_ADDR> <PARAMS>",
+    "run-get-tx-count": "npx hardhat run --network polygon scripts/get-tx-count.ts",
+    "test-pool-deposits": "npx hardhat run --network hardhat scripts/pool-deposits.ts"
+  },
+  "keywords": [
+    "solidity",
+    "hardhat"
+  ],
+  "author": "cpascoli",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^2.0.1",
+    "@nomiclabs/hardhat-ethers": "^2.2.2",
+    "@nomiclabs/hardhat-etherscan": "^3.1.5",
+    "@nomiclabs/hardhat-waffle": "^2.0.3",
+    "chai": "^4.3.7",
+    "ethereum-waffle": "^3.4.4",
+    "ethers": "^5.7.2",
+    "hardhat": "^2.12.6",
+    "hardhat-abi-exporter": "^2.10.1",
+    "hardhat-contract-sizer": "^2.7.0",
+    "hardhat-deploy": "^0.11.22",
+    "hardhat-gas-reporter": "^1.0.9"
+  },
+  "dependencies": {
+    "@chainlink/contracts": "^0.6.0",
+    "@nomicfoundation/hardhat-network-helpers": "^1.0.7",
+    "@openzeppelin/contracts": "^4.8.1",
+    "dotenv": "^16.0.3"
+  }
+}

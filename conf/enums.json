@@ -1,0 +1,15 @@
+{
+    "RouterVersion": {
+        "V2": 0,
+        "V3": 1
+    },
+    "RouterType": {
+        "Uniswap": 0,
+        "QuickSwap": 1
+    },
+    "ActionType": {
+        "NONE": 0,
+        "BUY": 1,
+        "SELL": 2
+    } 
+}

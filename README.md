@@ -2,17 +2,17 @@
 
 This repo contains the suite of Solidity smart contracts for HashStrat Pools and Strategies.
 
-HashStrat Pools hold a risk asset (e.g WETH or WBTC) and a stable asset (e.g USDC or DAI).  
-Each Pool is configured with a Strategy that is able to trade between the risk asset and the stable asset held in the Pool.  
-Users can deposit stable assets into a Pool and let the strategies take care of the rest.
+- HashStrat Pools hold a risk asset (e.g WETH or WBTC) and a stable asset (e.g USDC).
+- Each Pool is configured with a Strategy that is able to trade between the risk asset and the stable asset held in the Pool.
+- Users can deposit USDC into a Pool. The Pool's strategy determine the inital portfolio allocation (e.g. the split between risk and stable asset) and will automatically manage it over time, with the goal to capture volatility in the risk asset and manage risk.
 
-Strategies use [Chainlink data feeds](https://docs.chain.link/docs/matic-addresses/) to assist their trading logic.
-[Chainlink Automation](https://docs.chain.link/chainlink-automation/introduction/) are used automate the strategy execution.
+Strategies use [Chainlink data feeds](https://docs.chain.link/docs/matic-addresses/) to assist their trading logic.  
+[Chainlink Automation](https://docs.chain.link/chainlink-automation/introduction/) is used automate the strategy execution.
 
 So far there are 3 strategies:
-- MeanReversionV1: DCA in and out the risk asset when its price deviates significantly from a long term moving average.
-- RebalancingV1: Ensures to rebalance the assets in the Pool when their value moves above or below predetermined levels of the overall value of the Pool.
-- TrendFollowV1: Allocates to the risk asset when its price moves above a short term moving average and sells into the stable asset when it moves below.
+1. MeanReversionV1: DCA in and out the risk asset when its price deviates significantly from a long term moving average.
+2. RebalancingV1: Ensures to rebalance the assets in the Pool when their value moves above or below predetermined levels of the overall value of the Pool.
+3. TrendFollowV1: Allocates to the risk asset when its price moves above a short term moving average and sells into the stable asset when it moves below.
  
 
 # Associated Repos 

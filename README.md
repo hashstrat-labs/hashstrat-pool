@@ -86,26 +86,19 @@ Polygon:
 npm run verify:matic
 ```
 
-## Query the user portfolio data (Kovan)
 
-```bash
-npm run portfolio-value:kovan
-```
+## HowTo use the Pool Contract (Polygon)
 
-## HowTo use the Pool Contract (Kovan)
+1. Approve Pool contract address to spend USDC 
+- call `approve` function on [USDC contract](https://polygonscan.com/token/0x2791bca1f2de4661ed88a30c99a7a9449aa84174#writeProxyContract)
 
-1. Approve Pool contract address to spend DAI 
-- call `approve` function on [DAI contract](https://kovan.etherscan.io/address/0x4f96fe3b7a6cf9725f59d353f723c1bdb64ca6aa#writeContract)
+2. Deposit USDC into the Pool:
+- call `deposit` function on Pool contract
 
-2. Deposit DAI into the pool:
-- call `deposit` function on [Pool contract](https://kovan.etherscan.io/address/0x1d97C5B5241C7E9a6bDFf2faC5b6EA95B33E1275#writeContract)
+3. Add PoolLP token info into Metamask
 
-3. Add PoolLP token info into Metamask (e.g use PoolLP contract address `0xCA9097759A8Fc3409e170c5e20Fc2e873A629b65`)
-
-4. Wait for [Chainlink Keeper](https://keepers.chain.link/kovan/3387) to trigger a portfolio rebalance 
- - alternatively you can call the `invest` function on the [Pool contract](https://kovan.etherscan.io/address/0x4f96fe3b7a6cf9725f59d353f723c1bdb64ca6aa#writeContract)
- 
- Execution of the `invest` function on the Pool contract can trigger a rebalance operation (aka a swap between DAI and WETH or viceversa) as demostrated in [this transaction](https://kovan.etherscan.io/tx/0x7cd5b8f334d48121713d6fe11280e164a78fafee0909648dd9254482d8e02a0f).
+4. Call the `performUpkeep` function on the Pool contract. This will trigger the execution of the Pool's strategy provided the `checkUpkeep` function returns true.
+Alternatively wait for [Chainlink Automation](https://automation.chain.link/polygon) to trigger a strategy execution.
 
 
 

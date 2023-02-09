@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.14;
 
+import "hardhat/console.sol";
 
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -16,7 +17,8 @@ import "./TokenMaths.sol";
 
 import "./strategies/IStrategy.sol";
 import "./swaps/IUniswapV2Router.sol";
-import "./swaps/ISwapRouter.sol";
+import "./swaps/ISwapsRouter.sol";
+
 
 
 /**
@@ -26,6 +28,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
    
     using TokenMaths for uint;
 
+    enum  UserOperation { DEPOSIT, WITHDRAWAL }
    
     struct SwapInfo {
         uint timestamp;
@@ -37,8 +40,6 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
         uint investTokenBalance;
     }
 
-    enum  UserOperation { DEPOSIT, WITHDRAWAL }
-
     struct UserInfo {
         uint timestamp;
         UserOperation operation;
@@ -46,7 +47,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
     }
 
     uint8 public immutable feesPercDecimals = 4;
-    uint public feesPerc;                    // using feePercDecimals precision (e.g 100 is 1%)
+    uint public feesPerc; // using feePercDecimals precision (e.g 100 is 1%)
 
     IDAOTokenFarm public daoTokenFarm;
 
@@ -58,7 +59,8 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
 
     event Deposited(address indexed user, uint amount);
     event Withdrawn(address indexed user, uint amount);
-    event Swapped(string indexed swapType, uint spent, uint bought, uint slippage);
+    event Swapped(string swapType, uint spent, uint bought, uint slippage);
+    event MaxSlippageExceeded(string swapType, uint amountIn, uint amountOutMin, uint slippage);
 
 
     uint public totalDeposited = 0;
@@ -71,47 +73,42 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
     address[] public users;
     mapping (address => bool) usersMap;
 
-    // Chainlink pricefeed
-    AggregatorV3Interface public priceFeed;
-
-    // Uniswap V2/V3 routers
-    IUniswapV2Router public immutable uniswapV2Router;
-    ISwapRouter public immutable uniswapV3Router;
-
+    // Chainlink price feeds
+    AggregatorV3Interface public riskAssetFeed;
+    AggregatorV3Interface public stableAssetFeed;
+    
+    ISwapsRouter public swapRouter;
     IStrategy public strategy;
 
-
-    uint public upkeepInterval;
-    uint public lastUpkeepTimeStamp;
 
     uint public slippageThereshold = 500; // allow for 5% slippage on swaps (aka should receive at least 95% of the expected token amount)
     SwapInfo[] public swaps;
 
+    uint24 public feeV3;
 
     constructor(
-        address _uniswapV2RouterAddress,
-        address _uniswapV3RouterAddress,
-        address _priceFeedAddress,
-        address _depositTokenAddress,
-        address _investTokenAddress,
-        address _lpTokenAddress,
-        address _strategyAddress,
-        uint _upkeepInterval,
-        uint _feesPerc) {
+        address swapRouterAddress,
+        address stableAssetFeedAddress,
+        address riskAssetFeedAddress,
+        address depositTokenAddress,
+        address investTokenAddress,
+        address lpTokenAddress,
+        address strategyAddress,
+        uint poolFees,
+        uint24 uniswapV3Fee
+    ) {
+        swapRouter = ISwapsRouter(swapRouterAddress);
 
-            uniswapV2Router = IUniswapV2Router(_uniswapV2RouterAddress);
-            uniswapV3Router = ISwapRouter(_uniswapV3RouterAddress);
+        stableAssetFeed = AggregatorV3Interface(stableAssetFeedAddress);
+        riskAssetFeed = AggregatorV3Interface(riskAssetFeedAddress);
 
-            priceFeed = AggregatorV3Interface(_priceFeedAddress);
-            investToken = IERC20Metadata(_investTokenAddress);
-            depositToken = IERC20Metadata(_depositTokenAddress);
-            lpToken = PoolLPToken(_lpTokenAddress);
-            strategy = IStrategy(_strategyAddress);
+        depositToken = IERC20Metadata(depositTokenAddress);
+        investToken = IERC20Metadata(investTokenAddress);
 
-            upkeepInterval = _upkeepInterval;
-            lastUpkeepTimeStamp = block.timestamp;
-
-            feesPerc = _feesPerc;
+        lpToken = PoolLPToken(lpTokenAddress);
+        strategy = IStrategy(strategyAddress);
+        feesPerc = poolFees;
+        feeV3 = uniswapV3Fee;
     }
 
 
@@ -124,6 +121,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
         return users;
     }
 
+
     function getUserInfos(address account) public view returns (UserInfo[] memory) {
         return userInfos[account];
     }
@@ -133,8 +131,8 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
 
     function lpTokensValue (uint lpTokens) public view returns (uint) {
         return lpToken.totalSupply() > 0 ? this.totalValue() * lpTokens / lpToken.totalSupply() : 0;
-
     }
+
 
     function portfolioValue(address account) external view returns (uint) {
         // the value of the portfolio allocated to the user, espressed in deposit tokens
@@ -158,52 +156,70 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
     }
 
 
-    //TODO return the value of the stable asset in USD
+    /** 
+    * @return value of the stable assets in the pool in USD
+    */
     function stableAssetValue() public override view returns(uint) {
-        return depositToken.balanceOf(address(this));
-    }
+        ( /*uint80 roundID**/, int price, /*uint startedAt*/, /*uint timeStamp*/, /*uint80 answeredInRound*/) = stableAssetFeed.latestRoundData();
 
-
-
-    //TODO optimize decimal conversion
-    // @return the value of the risk asset according to the the latest pricefeed price
-    function riskAssetValue() public override view returns(uint) {
-        ( /*uint80 roundID**/, int price, /*uint startedAt*/, /*uint timeStamp*/, /*uint80 answeredInRound*/) = priceFeed.latestRoundData();
         if (price <= 0) return 0;
-        uint value = investToken.balanceOf( address(this) ).mul( uint(price),
-                        investToken.decimals(), priceFeed.decimals(),
-                        depositToken.decimals()
-                    );
+        
+        uint value = depositToken.balanceOf( address(this) ).mul( uint(price),
+                depositToken.decimals(), stableAssetFeed.decimals(),
+                depositToken.decimals()
+        );
 
         return value;
     }
+
+
+    /** 
+    * @return value of the risk assets in the pool in USD
+    */
+    function riskAssetValue() public override view returns(uint) {
+        ( /*uint80 roundID**/, int price, /*uint startedAt*/, /*uint timeStamp*/, /*uint80 answeredInRound*/) = riskAssetFeed.latestRoundData();
+        if (price <= 0) return 0;
+
+        uint value = investToken.balanceOf( address(this) ).mul( uint(price),
+                investToken.decimals(), riskAssetFeed.decimals(),
+                depositToken.decimals()
+            );
+
+        return value;
+    }
+
 
     function investTokenPercentage() internal view returns (uint)  {
         return (lpToken.totalSupply() == 0) ? 0 : 10 ** uint(portfolioPercentageDecimals()) * riskAssetValue() / totalValue(); 
     }
 
-    function portfolioPercentageDecimals() public view returns (uint8) {
-        return priceFeed.decimals();
+    function portfolioPercentageDecimals() internal view returns (uint8) {
+        return riskAssetFeed.decimals();
     }
 
     
     /////  Deposit ///// 
    function deposit(uint amount) nonReentrant public override {
 
-        //portfolio allocation before the deposit
-        require(depositToken.allowance(msg.sender, address(this)) >= amount, "Insufficient allowance");
+        require(depositToken.allowance(msg.sender, address(this)) >= amount, "PoolV4: Insufficient allowance");
         
         if (amount == 0) return;
     
+        // portfolio allocation before the deposit
+        uint investTokenPerc = investTokenPercentage();
+
         // 1. Transfer deposit amount to the pool
+        depositToken.transferFrom(msg.sender, address(this), amount);
+            
         deposits[msg.sender] += amount;
         totalDeposited += amount;
 
-        // record user and deposit infos
+        // and record user address (if new user) and deposit infos
         if (!usersMap[msg.sender]) {
             usersMap[msg.sender] = true;
             users.push(msg.sender);
         }
+
         userInfos[msg.sender].push(
             UserInfo({
                 timestamp: block.timestamp,
@@ -211,25 +227,28 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
                 amount: amount
             })
         );
-
-        depositToken.transferFrom(msg.sender, address(this), amount);
-
+      
         // 2. Calculate LP tokens for this deposit that will be minted to the depositor
         // Important: calculate 'depositLPTokens' AFTER the deposit tokens have been transferred to he pool
         uint depositLPTokens = lpTokensForDeposit(amount);
 
         if (lpToken.totalSupply() == 0) {
-            // if the pool was empty before this deposit => run the strategy and log the swap info.
-            strategyEval();
+            // if the pool was empty before this deposit => exec the strategy once to ensure the initial asset allocation
+            strategyExec();
+
         } else {
             // if the pool was not empty before this deposit => ensure the pool remains balanced with this deposit.
             // swap some of the deposit amount into investTokens to keep the pool balanced at current levels
-            uint investTokenPerc = investTokenPercentage();
-            uint precision = 10 ** uint(portfolioPercentageDecimals());
-            uint rebalanceAmount = investTokenPerc * amount / precision;
-            if (rebalanceAmount > 0) {
-                swapIfNotExcessiveSlippage(StrategyAction.BUY, address(depositToken), address(investToken), rebalanceAmount, false);
-            }
+            // uint investTokenPerc = investTokenPercentage();
+            uint rebalanceAmount = investTokenPerc * amount / (10 ** uint(portfolioPercentageDecimals()));
+
+            swap(
+                address(depositToken),
+                address(investToken),
+                rebalanceAmount,
+                0,
+                address(this)
+            );
         }
 
         // 3. Mint LP tokens to the user
@@ -271,16 +290,22 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
     /////  Withdrawals ///// 
 
     function withdrawAll() nonReentrant external {
-        _withdrawLP(lpToken.balanceOf(msg.sender));
+        collectFeeAndWithdraw(lpToken.balanceOf(msg.sender));
     }
 
+    function withdrawLP(uint amount) nonReentrant external {
+        collectFeeAndWithdraw(amount);
+    }
+
+
     /** 
-    * @notice Withdraw 'amount' of LP tokens from the pool and receive the equivalent amoun of deposit tokens
+    * @notice Withdraw 'amount' of LP tokens from the pool and receive the equivalent amount of deposit tokens
     *         If fees are due, those are deducted from the LP amount before processing the withdraw.
     * 
     * @param amount the amount of LP tokent to withdraw
     */
-    function withdrawLP(uint amount) nonReentrant external {
+    function collectFeeAndWithdraw(uint amount) internal {
+
         uint fees = feesForWithdraw(amount, msg.sender);
         uint netAmount = amount - fees;
 
@@ -293,15 +318,15 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
         _withdrawLP(netAmount);
     }
 
-
     /** 
     *   @notice Burns the 'amount' of LP tokens and sends to the sender the equivalent value in deposit tokens.
+    *           If withdrawal producesa a swap with excessive slippage the transaction will be reverted.
     *   @param amount the amount of LP tokent being withdrawn.
     */
     function _withdrawLP(uint amount) internal {
-        
+
         if(amount == 0) return;
-        
+   
         require(amount <= lpToken.balanceOf(msg.sender), "LP balance exceeded");
 
         uint precision = 10 ** uint(portfolioPercentageDecimals());
@@ -318,20 +343,17 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
         // 2. burn the user's LP tokens
         lpToken.burn(msg.sender, amount);
 
-        uint depositTokensSwapped = 0;
         // 3. swap some invest tokens back into deposit tokens
-        if (withdrawInvestTokensTokensAmount > 0) {
-            // swap some investTokens into depositTokens to be withdrawn
-            uint256 amountMin = getAmountOutMin(address(investToken), address(depositToken), withdrawInvestTokensTokensAmount);
-            swap(address(investToken), address(depositToken), withdrawInvestTokensTokensAmount, amountMin, address(this));
-        
-            // determine how much depositTokens were swapped
-            uint depositTokensAfterSwap = depositToken.balanceOf(address(this));
-            depositTokensSwapped = depositTokensAfterSwap - depositTokensBeforeSwap;
-        }
+        uint depositTokensReceived = swap(
+            address(investToken), 
+            address(depositToken), 
+            withdrawInvestTokensTokensAmount, 
+            0, 
+            address(this)
+        );
 
         // 4. transfer depositTokens to the user
-        uint amountToWithdraw = withdrawDepositTokensAmount + depositTokensSwapped;        
+        uint amountToWithdraw = withdrawDepositTokensAmount + depositTokensReceived;        
 
         withdrawals[msg.sender] += amountToWithdraw;
         totalWithdrawn += amountToWithdraw;
@@ -405,23 +427,25 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
 
     //// STRATEGY EXECUTION ////
 
-    // KeeperCompatibleInterface implementation //
+    // KeeperCompatibleInterface  //
     function checkUpkeep(bytes calldata /* checkData */) external view override returns (bool upkeepNeeded, bytes memory performData) {
-        //TODO ask strategy if should be avaluated
-       return ((block.timestamp - lastUpkeepTimeStamp) >= upkeepInterval, "");
+       return  ( strategy.shouldPerformUpkeep(), "");
     }
 
+
     function performUpkeep(bytes calldata /* performData */) external override {
-        if ((block.timestamp - lastUpkeepTimeStamp) >= upkeepInterval ) {
-            lastUpkeepTimeStamp = block.timestamp;
-            strategyEval();
+        if ( strategy.shouldPerformUpkeep() ) {
+            strategyExec();
         }
     }
 
-    function strategyEval() internal {
+    /**
+     * @notice evaluate the strategy and execute a swap required by the strategy if max slippage is exceeed.  
+     */
+    function strategyExec() internal {
 
         // ask the strategy if a swap should happen 
-        (StrategyAction action, uint amountIn) = strategy.evaluate();
+        (StrategyAction action, uint amountIn) = strategy.exec();
 
         if (action == StrategyAction.NONE || amountIn == 0) {
             return;
@@ -429,7 +453,6 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
 
         address tokenIn;
         address tokenOut;
-
         if (action == StrategyAction.BUY) {
             tokenIn = address(depositToken);
             tokenOut = address(investToken);
@@ -441,105 +464,62 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
         swapIfNotExcessiveSlippage(action, tokenIn, tokenOut, amountIn, true);
     }
 
+
     //// SWAP FUNCTIONALITY ////
-    function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, address to) internal {
 
+    /**
+     * @notice uses SwapsRouter to performa a single swap 'amountOutMin' of tokenIn into tokenOut.
+     *          It does not check slippage and it's not expected to revert
+     * @return amountOut the amount received from the swap
+     */
+    function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, address recipent) internal returns (uint amountOut) {
+        
+        if (amountIn > 0) {
+            IERC20Metadata token = tokenIn == address(depositToken) ?  depositToken : investToken;
+            token.approve(address(swapRouter), amountIn);
+            amountOut = swapRouter.swap(tokenIn, tokenOut, amountIn, amountOutMin, recipent, feeV3);
+        }
     }
 
 
-    function swapV2(
-        address tokenIn, 
-        address tokenOut, 
-        uint amountIn,
-        uint amountOutMin,
-        address to
-    ) internal returns (uint amountOut) {
-
-        // allow the uniswapv2 router to spend the token we just sent to this contract
-        IERC20(tokenIn).approve(address(uniswapV2Router), amountIn);
-
-        // path is an array of addresses and we assume there is a direct pair btween the in and out tokens
-        address[] memory path = new address[](2);
-        path[0] = tokenIn;
-        path[1] = tokenOut;
-
-        // the deadline is the latest time the trade is valid for
-        // for the deadline we will pass in block.timestamp
-        uint[] memory amounstOut = uniswapV2Router.swapExactTokensForTokens(
-            amountIn,
-            amountOutMin,
-            path,
-            to,
-            block.timestamp
-        );
-
-        amountOut = amounstOut[amounstOut.length-1];
-    }
+   
 
 
-    function swapV3(
-        address tokenIn,
-        address tokenOut,
-        uint24 poolFee,
-        uint amountIn,
-        uint amountOutMin,
-        address to
-    ) internal returns (uint amountOut) {
+    function swapIfNotExcessiveSlippage(
+        StrategyAction action,
+        address _tokenIn, 
+        address _tokenOut, 
+        uint256 _amountIn,
+        bool log
+    ) internal returns (uint spent, uint bought) {
 
-        IERC20(tokenIn).approve(address(uniswapV3Router), amountIn);
+        string memory swapType  = (action == StrategyAction.BUY) ? "BUY" : (action == StrategyAction.SELL) ? "SELL" : "n/a";
 
-        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
-            .ExactInputSingleParams({
-                tokenIn: tokenIn,
-                tokenOut: tokenOut,
-                fee: poolFee,
-                recipient: to,
-                deadline: block.timestamp,
-                amountIn: amountIn,
-                amountOutMinimum: amountOutMin,
-                sqrtPriceLimitX96: 0
-            });
+        // ensure max slippage is not exceeded
+        (uint amountOutMin, uint slippage) = slippagePercentage(_tokenIn, _tokenOut, _amountIn);
+        if (amountOutMin == 0) {
+            return (0, 0);
+        }
+        if (slippage > slippageThereshold) {
+            emit MaxSlippageExceeded(swapType, _amountIn, amountOutMin, slippage);
+            return (0, 0);
+        }
 
-// UNISWAP V3  (Polygon) 0xE592427A0AEce92De3Edee1F18E0157C05861564 
-// USDC  0x2791bca1f2de4661ed88a30c99a7a9449aa84174  
-// WBTC  0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6
-// in   10000000 (6 decimals)
-// out   (8 decimals)  43478 (0.00043478 BTC)
-// ["0x2791bca1f2de4661ed88a30c99a7a9449aa84174", "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6", 500, "0x209f4a997883Ac8e5f686ec59DD1DC47fccE4FAd", 1674844019, 10000000, 0, 0]
-
-        amountOut = uniswapV3Router.exactInputSingle(params);
-    }
-
-    function swapIfNotExcessiveSlippage(StrategyAction action, address _tokenIn, address _tokenOut, uint256 _amountIn, bool log) internal {
-
-        // ensure slippage is not too much (e.g. <= 500 for a 5% slippage)
-        (uint amountMin, uint slippage) = slippagePercentage(_tokenIn, _tokenOut, _amountIn);
-
-        require(slippage <= slippageThereshold, "Slippage exceeded");
-        // if (slippage > slippageThereshold) {
-        //     revert("Slippage exceeded");
-        // }
-
-        uint256 depositTokenBalanceBefore = depositToken.balanceOf(address(this));
-        uint256 investTokenBalanceBefore = investToken.balanceOf(address(this));
+        uint depositTokenBalanceBefore = depositToken.balanceOf(address(this));
+        uint investTokenBalanceBefore = investToken.balanceOf(address(this));
 
         // perform swap required to rebalance the portfolio
-       swap(_tokenIn, _tokenOut, _amountIn, amountMin, address(this));
+        // console.log("swapIfNotExcessiveSlippage() - BUY amountIn: ", _amountIn, amountOutMin);
+        swap(_tokenIn, _tokenOut, _amountIn, amountOutMin, address(this));
 
         // balances after swap
-        uint256 depositTokenBalanceAfter = depositToken.balanceOf(address(this));
-        uint256 investTokenBalanceAfter = investToken.balanceOf(address(this));
+        uint depositTokenBalanceAfter = depositToken.balanceOf(address(this));
+        uint investTokenBalanceAfter = investToken.balanceOf(address(this));
 
-        uint256 spent;
-        uint256 bought;
-        string memory swapType;
-        
         if (action == StrategyAction.BUY) {
-            swapType = "BUY";
             spent = depositTokenBalanceBefore - depositTokenBalanceAfter;
             bought = investTokenBalanceAfter - investTokenBalanceBefore;
         } else if (action == StrategyAction.SELL) {
-            swapType = "SELL";
             spent = investTokenBalanceBefore - investTokenBalanceAfter;
             bought = depositTokenBalanceAfter - depositTokenBalanceBefore;
         }
@@ -549,52 +529,43 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
         }
 
         emit Swapped(swapType, spent, bought, slippage);
+
+        return (spent, bought);
     }
 
 
     /**
-    * @return amountOut the minimum amount received from the V2 swap in
-    */
-    function getAmountOutMin(address _tokenIn, address _tokenOut, uint256 _amountIn) internal view returns (uint amountOut) {
-        address[] memory path = new address[](2);
-        path[0] = _tokenIn;
-        path[1] = _tokenOut;
+     * @return amountOutMin the amount of tokenOut received from the swap and slippage as a percentage with 4 digits decimals.
+     */
+    function slippagePercentage(address tokenIn, address tokenOut, uint amountIn) internal  returns (uint amountOutMin, uint slippage) {
+        ( /*uint80 roundID**/, int price, /*uint startedAt*/, /*uint timeStamp*/, /*uint80 answeredInRound*/) = riskAssetFeed.latestRoundData();
 
-        uint256[] memory amountOutMins = uniswapV2Router.getAmountsOut(_amountIn, path);
-        // require(amountOutMins.length >= path.length , "Invalid amountOutMins size");
-
-        amountOut = amountOutMins[path.length - 1];
-    }
-
-
-    // Returns the min amount of tokens expected from the swap and the slippage calculated as a percentage from the feed price. 
-    // The returned percentage is returned with 4 digits decimals
-    // E.g: For a 5% slippage below the expected amount 500 is returned
-    function slippagePercentage(address tokenIn, address tokenOut, uint amountIn) public view returns (uint amountMin, uint slippage) {
-        ( /*uint80 roundID**/, int price, /*uint startedAt*/, /*uint timeStamp*/, /*uint80 answeredInRound*/) = priceFeed.latestRoundData();
-
-        require(price > 0, "Invalid price");
+        // if received a negative price the return amountOutMin = 0 to avoid swap 
+        if (price < 0) return (0, 0);
 
         uint amountExpected;
 
         // swap USD => ETH
         if (tokenIn == address(depositToken) && tokenOut == address(investToken)) {
             amountExpected = amountIn.div( uint(price), 
-                            depositToken.decimals(), priceFeed.decimals(),
+                            depositToken.decimals(), riskAssetFeed.decimals(),
                             investToken.decimals() ); // return value is in ETH (invest token decimals) 
         } 
 
         // swap ETH => USD
         if (tokenIn == address(investToken) && tokenOut == address(depositToken)) {
             amountExpected = amountIn.mul( uint(price), 
-                            investToken.decimals(), priceFeed.decimals(),
+                            investToken.decimals(), riskAssetFeed.decimals(),
                             depositToken.decimals());  // return value is in USD (deposit token decimals) 
         }
 
-        amountMin = getAmountOutMin(tokenIn, tokenOut, amountIn);
-        if (amountMin >= amountExpected) return (amountMin, 0);
+        amountOutMin = swapRouter.getAmountOutMin(tokenIn, tokenOut, amountIn, feeV3);
 
-        slippage = 10000 - (10000 * amountMin / amountExpected); // e.g 10000 - 9500 = 500  (5% slippage) - min slipage: 1 = 0.01%
+        if (amountOutMin >= amountExpected) return (amountOutMin, 0);
+
+        slippage = 10000 - (10000 * amountOutMin / amountExpected); // e.g 10000 - 9500 = 500  (5% slippage) - min slipage: 1 = 0.01%
+
+        // console.log(">>> Poolv4 - slippage", slippage);
     }
 
 
@@ -602,9 +573,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
 
         (   /*uint80 roundID**/, int price, /*uint startedAt*/,
             /*uint timeStamp*/, /*uint80 answeredInRound*/
-        ) = priceFeed.latestRoundData();
-
-        require(price > 0, "Invalid price");
+        ) = riskAssetFeed.latestRoundData();
 
         // Record swap info
         SwapInfo memory info = SwapInfo({
@@ -632,7 +601,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
     }
 
     function setUpkeepInterval(uint innterval) public onlyOwner {
-        upkeepInterval = innterval;
+        strategy.setUpkeepInterval(innterval);
     }
 
     function setFeesPerc(uint _feesPerc) public onlyOwner {

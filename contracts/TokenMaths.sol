@@ -9,46 +9,25 @@ pragma solidity ^0.8.14;
 library TokenMaths {
 
     /**
-     * @dev give an account access to this role
+     * @notice addition between 2 amounts with different decimals. Assumes decimals1 <= 18 and decimals2 <= 18
      */
-    function add(uint amount1, uint amount2, uint8 decimals1, uint8 decimals2, uint8 decimalsOut) internal pure returns (uint) {
-
-        return fromWei(toWei(amount1, decimals1) + toWei(amount2, decimals2),  decimalsOut);
-
-        // if (investTokensDecimals >= depositTokenDecimals) {
-        //     // invest token has more decimals than deposit token, have to divide the invest token value by the difference
-        //     uint decimalsConversionFactor = 10 ** (investTokensDecimals - depositTokenDecimals);
-        //     value = investTokens * uint(price) / decimalsConversionFactor / priceFeedPrecision;
-        // } else {
-        //     // invest token has less decimals tham deposit token, have to multiply invest token value by the difference
-        //     uint decimalsConversionFactor = 10 ** (depositTokenDecimals - investTokensDecimals);
-        //     value = investTokens * uint(price) * decimalsConversionFactor / priceFeedPrecision;
-        // }
-     
-    }
-
-
-
+    // function add(uint amount1, uint amount2, uint8 decimals1, uint8 decimals2, uint8 decimalsOut) internal pure returns (uint) {
+    //     return fromWei(toWei(amount1, decimals1) + toWei(amount2, decimals2),  decimalsOut);
+    // }
 
 
     /**
-     * @dev remove an account's access to this role
-     */
-    function sub(uint amount1, uint amount2, uint8 decimals1, uint8 decimals2, uint8 decimalsOut) internal pure returns (uint) {
-        return fromWei(toWei(amount1, decimals1) - toWei(amount2, decimals2),  decimalsOut);
-    }
-
-    /**
-     * @dev check if an account has this role
-     * @return bool
+     * @notice division between 2 amounts with different decimals. Assumes decimals1 <= 18 and decimals2 <= 18
      */
     function div(uint amount1, uint amount2, uint8 decimals1, uint8 decimals2, uint8 decimalsOut) internal pure returns (uint) {
-        return fromWei(toWei(amount1, decimals1) / toWei(amount2, decimals2),  decimalsOut);
+        return (10 ** decimalsOut * toWei(amount1, decimals1) / toWei(amount2, decimals2));
     }
 
-
+    /**
+     * @notice multiplication between 2 amounts with different decimals. Assumes decimals1 <= 18 and decimals2 <= 18
+     */
     function mul(uint amount1, uint amount2, uint8 decimals1, uint8 decimals2, uint8 decimalsOut) internal pure returns (uint) {
-        return fromWei(toWei(amount1, decimals1) * toWei(amount2, decimals2),  decimalsOut);
+       return 10 ** decimalsOut * amount1 * amount2 / 10 ** (decimals1 + decimals2);
     }
 
 
@@ -65,7 +44,6 @@ library TokenMaths {
 
         return amount / 10 ** (18 - decimals);
     }
-
 
 }
 

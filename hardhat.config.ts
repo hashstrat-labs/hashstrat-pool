@@ -9,17 +9,33 @@ require('dotenv').config()
 
 const { RPC_URL_POLYGON_MAIN, RPC_URL_GOERLI, ETHERSCAN_API_KEY, POLYGONSCAN_API_KEY, MNEMONIC } = process.env;
 
-const config: HardhatUserConfig = {
+const config : HardhatUserConfig = {
+  
+  defaultNetwork: "hardhat",
+
   solidity: {
     version: "0.8.17",
     settings: {
       optimizer: {
         enabled: true,
-        runs: 10,
+        runs: 200,
       },
     },
   },
-  defaultNetwork: "hardhat",
+
+  paths: {
+    sources: "./contracts",
+    artifacts: "./artifacts"
+  },
+
+  gasReporter: {
+    enabled: true,
+    outputFile: "gas-report.txt",
+    noColors: true,
+    showTimeSpent: true,
+    currency: 'USD',
+  },
+
   networks: {
     hardhat: {
       forking: {
@@ -37,11 +53,26 @@ const config: HardhatUserConfig = {
       gasPrice:  120000000000,  // 120 Gwei
     },
   },
+
+  paths: {
+    sources: './contracts',
+    tests: './test',
+    cache: './cache',
+    artifacts: './build/artifacts',
+  },
+
+  abiExporter: {
+    path: './build/abi',
+    clear: true,
+    flat: true,
+    spacing: 2,
+  },
+
   etherscan: {
     apiKey: {
         mainnet: ETHERSCAN_API_KEY || "",
-        kovan: ETHERSCAN_API_KEY || "",
         polygon: POLYGONSCAN_API_KEY || "",
+        goerli: '',
     }
   },
 };

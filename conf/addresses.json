@@ -1,0 +1,23 @@
+{
+    "polygon": {
+        "uniswap_v3_quoter": "0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6",
+        "quickswap_v3_quoter": "0xa15F0D7377B2A0C0c10db057f641beD21028FC89",
+
+        "uniswap_v3_router": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+        "quickswap_v3_router": "0xf5b509bB0909a69B1c207E495f687a596C168E12",
+        "quickswap_v2_router": "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff",
+
+        "usdc": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+        "weth": "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",
+        "wbtc": "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6",
+
+        "wbtc_usd_aggregator": "0xc907E116054Ad103354f2D350FD2514433D57F6f",
+        "usdc_usd_aggregator": "0xfE4A8cc5b5B2366C1B58Bea3858e81843581b2F7",
+
+        "usd_holder": "0xe7804c37c13166ff0b37f5ae0bb07a3aebb6e245",
+        "btc_holder": "0xBA12222222228d8Ba445958a75a0704d566BF2C8"
+    }
+}
+
+
+

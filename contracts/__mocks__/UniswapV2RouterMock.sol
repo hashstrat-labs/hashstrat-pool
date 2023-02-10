@@ -7,8 +7,6 @@ import "@openzeppelin/contracts/utils/Strings.sol";
 
 import "../swaps/IUniswapV2Router.sol";
 
-import "hardhat/console.sol";
-
 
 /**
     Mock implementation of swap functionality and price feed via the interfaces:

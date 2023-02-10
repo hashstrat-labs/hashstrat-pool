@@ -4,7 +4,7 @@ import { ethers } from "hardhat";
 
 import { deployMockContract } from "ethereum-waffle"
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { fromUsdc, toUsdc, toWbtc, transferFunds } from "./helpers"
+import { fromBtc, fromUsdc, toUsdc, toWbtc, transferFunds, waitDays } from "./helpers"
 
 import erc20_abi from "../scripts/abis/erc20.json";
 import addresses from "../conf/addresses.json";
@@ -45,12 +45,8 @@ describe("PoolV4", function () {
         await transferFunds(toWbtc('5'), uniswapV2RouterMock.address, "btc")
 
         // prepare mocks
-        await usdcAggregatorMock.mock.latestRoundData.returns(0, 100000000, 1801686057, 1801686057, 0);
         await usdcAggregatorMock.mock.decimals.returns(8);
-
-        await wbtcAggregatorMock.mock.latestRoundData.returns(0, 2000000000000, 1801686057, 1801686057, 0);
         await wbtcAggregatorMock.mock.decimals.returns(8);
-
 
         // 1. Deploy Pool LP token
         const PoolLPToken = await ethers.getContractFactory("PoolLPToken")
@@ -58,17 +54,18 @@ describe("PoolV4", function () {
         await poolLPToken.deployed()
 
         // 2. Depoly Strategy
-        const RebalancingStrategyV1 = await ethers.getContractFactory("RebalancingStrategyV1")
+        const TrendFollowV1 = await ethers.getContractFactory("TrendFollowV1")
 
-        const strategy = await RebalancingStrategyV1.deploy(
-            '0x0000000000000000000000000000000000000000',// pool address not known yet
+        const strategy = await TrendFollowV1.deploy(
+            '0x0000000000000000000000000000000000000000',
             usdcAggregatorMock.address,
             wbtcAggregatorMock.address,
-            addresses.polygon.usdc,
-            addresses.polygon.wbtc,
-            60,   // target portfolio 60% WBTC / 40% USDC
-            10,   // 10% seems a good rebalancing band that requires price to double or halve to rebalance
-        );
+            usdc.address, // 6 decimals
+            wbtc.address, // 8 decimals
+
+            40,      // moving average period (movingAveragePeriod)
+            19952 * (10 ** 8) ,  // initial 50D SMA value (initialMeanValue)
+        ); 
         await strategy.deployed()
 
 
@@ -111,7 +108,6 @@ describe("PoolV4", function () {
         await swapRouter.addRouter(uniswapV2RouterMock.address, enums.RouterVersion.V2, enums.RouterType.QuickSwap)
         await swapRouter.setActiveRouter(0)
 
-
         return {
             poolLPToken, swapRouter, strategy, pool, usdc, wbtc,
             usdcAggregatorMock, wbtcAggregatorMock, quoterUniswapPMock, uniswapV2RouterMock
@@ -119,72 +115,88 @@ describe("PoolV4", function () {
     }
 
 
-    describe("Accounting", function () {
+    describe("TWAP", function () {
 
-		it("When USDC tokens are depoisted should increase the deposit balance", async function () {
-			const { pool, poolLPToken, usdc } = await loadFixture(deployPoolContract);
+		it("Large swaps are executed in chunks of the expected max size", async function () {
+			const { pool, usdc, wbtc, usdcAggregatorMock, wbtcAggregatorMock } = await loadFixture(deployPoolContract);
 
-            const [ _, addr1 ] = await ethers.getSigners();
-
-          
-            await transferFunds( toUsdc('1000'), addr1.address)
-
-            const deposit1 = toUsdc('100') 
-            await usdc.connect(addr1).approve(pool.address, deposit1)
-            await pool.connect(addr1).deposit(deposit1)
-
-            const balance1 = await pool.deposits(addr1.address)
-            expect( balance1 ).to.equal( deposit1 )
-
-            const deposit2 = toUsdc('50') 
-            await usdc.connect(addr1).approve(pool.address, deposit2)
-            await pool.connect(addr1).deposit(deposit2)
-
-            const balance2 = await pool.deposits(addr1.address)
-            expect( balance2 ).to.equal( deposit1.add(deposit2) )
-		});
-
-
-        it("When USDC tokens are withdrawn should increase the withrawn balance", async function () {
-			const { pool, poolLPToken, usdc } = await loadFixture(deployPoolContract);
-
-            const [ _, addr1 ] = await ethers.getSigners();
-            await transferFunds( toUsdc('1000'), addr1.address)
-
-            const deposit1 = toUsdc('100') 
-            await usdc.connect(addr1).approve(pool.address, deposit1)
-            await pool.connect(addr1).deposit(deposit1)
-
-            const balance1 = await pool.deposits(addr1.address)
-            expect( balance1 ).to.equal( deposit1 )
+            // BTC at $20k 
+            await usdcAggregatorMock.mock.latestRoundData.returns(0, 100000000, 1801686057, 1801686057, 0);
+            await wbtcAggregatorMock.mock.latestRoundData.returns(0, 2000000000000, 1801686057, 1801686057, 0);
             
-            const lpBalance = await poolLPToken.balanceOf(addr1.address)
-            const withdrawLP =  lpBalance.div(3)
-            const withdrawValue = await pool.lpTokensValue(withdrawLP)
-
-            await pool.connect(addr1).withdrawLP(withdrawLP)
-
-            const withdrawalBalance = await pool.withdrawals(addr1.address)
-
-            expect( fromUsdc(withdrawalBalance) ).to.be.approximately( fromUsdc(withdrawValue) , 0.1 )
-		});
-
-
-        it("attempting to withdraw more LP tokens than available in balance should throw", async () => {
-			const { pool, poolLPToken, usdc } = await loadFixture(deployPoolContract);
-
             const [ _, addr1 ] = await ethers.getSigners();
-            await transferFunds( toUsdc('100'), addr1.address)
 
-            const deposit1 = toUsdc('100') 
+            // $1000 max swap value
+            const maxSwapSize = toUsdc(100) 
+            await pool.setSwapMaxValue( maxSwapSize )
+
+            const deposit1 = toUsdc(3000) 
+            await transferFunds( deposit1, addr1.address)
+
             await usdc.connect(addr1).approve(pool.address, deposit1)
             await pool.connect(addr1).deposit(deposit1)
 
-            const lpBalance = await poolLPToken.balanceOf(addr1.address)
-            const amount = lpBalance.add(1)
+            const balance1 = await pool.deposits(addr1.address)
+            expect( balance1 ).to.equal( deposit1 )
 
-            await expect( pool.connect(addr1).withdrawLP(amount) ).to.be.reverted
-        });
+            const poolUsdc = await usdc.balanceOf(pool.address)
+            const poolBtc = await wbtc.balanceOf(pool.address)
+            
+
+            expect( await pool.riskAssetValue() ).to.be.lessThanOrEqual( maxSwapSize )
+            expect( await pool.riskAssetValue() ).to.be.greaterThan( maxSwapSize.div(2) )
+            expect( await pool.totalValue() ).to.be.approximately(deposit1, 1)
+
+		});
+        
+
+        it("Process the TWAP swap, chunk by chunk, to the max of 256 swaps", async function () {
+			const { pool, strategy, usdc, wbtc, usdcAggregatorMock, wbtcAggregatorMock } = await loadFixture(deployPoolContract);
+
+            // BTC at $20k 
+            await usdcAggregatorMock.mock.latestRoundData.returns(0, 100000000, 1801686057, 1801686057, 0);
+            await wbtcAggregatorMock.mock.latestRoundData.returns(0, 2000000000000, 1801686057, 1801686057, 0);
+            
+            const [ _, addr1 ] = await ethers.getSigners();
+
+            // set a very small max swap value of $10
+            const maxSwapSize = toUsdc(10) 
+            await pool.setSwapMaxValue( maxSwapSize )
+
+            // send 10k USDC to the pool that will need to be swapped for WBTC
+            const poolUsdc = toUsdc(10_000)
+            await transferFunds(poolUsdc, pool.address, "usdc")
+    
+            waitDays(5)
+            expect( await strategy.shouldPerformUpkeep() ).to.be.true
+
+            // expect the twap size processed to be the 1/256 of the original size 20_000
+            const expectedTwapChunk = poolUsdc.div(256) 
+            const expectedBought = expectedTwapChunk.mul(10 ** 2).div(20_000)
+
+            for (let i=1; i <= 255; i++) {
+                // execute twap swap and verify that a twap chunk was swapped
+                await pool.performUpkeep(new Int8Array())
+                const swapInfo = await pool.twapSwaps()
+                expect( swapInfo.side ).is.equal(enums.ActionType.BUY)
+                expect( swapInfo.total ).is.equal( poolUsdc )
+                expect( swapInfo.size ).is.equal( expectedTwapChunk )
+                expect( swapInfo.sold ).is.equal( expectedTwapChunk.mul(i) )
+                expect( swapInfo.bought ).is.equal( expectedBought.mul(i) )
+            }
+
+            // execute last twap swap and verity the whole swap was completed 
+            await pool.performUpkeep(new Int8Array())
+            const swapInfo = await pool.twapSwaps()
+            const boughtTotal = poolUsdc.mul(100).div(20_000)
+
+            expect( swapInfo.size ).is.equal( expectedTwapChunk )
+            expect( swapInfo.sold ).is.equal( poolUsdc )
+            expect( swapInfo.sold ).is.equal( swapInfo.total )
+            expect( fromBtc(swapInfo.bought) ).is.approximately(fromBtc( boughtTotal ), 0.00001)
+		});
+
+        
 
     });
 

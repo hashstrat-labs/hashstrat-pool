@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.14;
 
-
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
@@ -85,7 +84,6 @@ contract TrendFollowV1 is IStrategy, Ownable {
      * @return true when strategy needs to be executed because upkeepInterval has elapsed
      */
     function shouldPerformUpkeep() external view returns (bool) {
-
         return (block.timestamp >= lastEvalTimestamp) && (block.timestamp - lastEvalTimestamp >= upkeepInterval);
     }
 

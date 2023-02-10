@@ -47,6 +47,7 @@ describe("PoolV4", function () {
         // 4. Deploy Pool
         const poolFees = 100        // 1% fee
         const uniswapV3Fee = 3000
+        const swapMaxValue = 10_000 * 10 ** 6
 
 		const PoolV4 = await ethers.getContractFactory("PoolV4")
 		const pool = await PoolV4.deploy(
@@ -58,7 +59,8 @@ describe("PoolV4", function () {
             poolLPToken.address,
             strategy.address,
             poolFees,
-            uniswapV3Fee
+            uniswapV3Fee,
+            swapMaxValue
         )
 		await pool.deployed()
 

@@ -24,8 +24,17 @@ const config : HardhatUserConfig = {
   },
 
   paths: {
-    sources: "./contracts",
-    artifacts: "./artifacts"
+    sources: './contracts',
+    tests: './test',
+    cache: './cache',
+    artifacts: './build/artifacts',
+  },
+
+  abiExporter: {
+    path: './build/abi',
+    clear: true,
+    flat: true,
+    spacing: 2,
   },
 
   gasReporter: {
@@ -52,20 +61,6 @@ const config : HardhatUserConfig = {
       accounts: { mnemonic: MNEMONIC  },
       gasPrice:  120000000000,  // 120 Gwei
     },
-  },
-
-  paths: {
-    sources: './contracts',
-    tests: './test',
-    cache: './cache',
-    artifacts: './build/artifacts',
-  },
-
-  abiExporter: {
-    path: './build/abi',
-    clear: true,
-    flat: true,
-    spacing: 2,
   },
 
   etherscan: {

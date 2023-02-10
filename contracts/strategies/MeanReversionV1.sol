@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.14;
 
-import "hardhat/console.sol";
-
-
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
@@ -279,8 +276,6 @@ contract MeanReversionV1 is IStrategy, Ownable {
         uint daysSinceLastUpdate =  (block.timestamp - lastEvalTimestamp) / 86400; 
         if (daysSinceLastUpdate == 0) return movingAverage;
 
-        console.log(">>> daysSinceLastUpdate: ", daysSinceLastUpdate);
-
         if (daysSinceLastUpdate < movingAveragePeriod) {
             // update the moving average, using movingAverage price for 'movingAveragePeriod' - 'daysSinceLasUpdate' days 
             // and the current price for the last 'daysSinceLasUpdate' days
@@ -288,13 +283,9 @@ contract MeanReversionV1 is IStrategy, Ownable {
             uint newPriceWeight = daysSinceLastUpdate * uint(price);
             updatedMA = (oldPricesWeight + newPriceWeight ) / movingAveragePeriod;
 
-            console.log(">>> updatedMovingAverage!!: ", oldPricesWeight, newPriceWeight);
-
         } else {
             updatedMA = uint(price);
         }
-
-        console.log(">>> updatedMovingAverage: ", updatedMA);
     }
 
 

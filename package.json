@@ -13,7 +13,8 @@
     "test": "npx hardhat test",
     "deploy:polygon": "npx hardhat run --network polygon scripts/deploy-polygon.ts",
     "verify:polygon": "npx hardhat verify --network polygon <POOL_ADDR> <PARAMS>",
-    "run-script": "npx hardhat run --network polygon scripts/get-tx-count.ts"
+    "run-get-tx-count": "npx hardhat run --network polygon scripts/get-tx-count.ts",
+    "test-pool-deposits": "npx hardhat run --network hardhat scripts/pool-deposits.ts"
   },
   "keywords": [
     "solidity",

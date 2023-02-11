@@ -5,7 +5,7 @@ import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-import "@chainlink/contracts/src/v0.8/interfaces/KeeperCompatibleInterface.sol";
+import "@chainlink/contracts/src/v0.8/interfaces/AutomationCompatibleInterface.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
 import "./IPoolV4.sol";
@@ -18,11 +18,10 @@ import "./swaps/IUniswapV2Router.sol";
 import "./swaps/ISwapsRouter.sol";
 
 
-
 /**
  * Owner of this contract should be DAOOperations
  */
-contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable {
+contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Ownable {
    
     using TokenMaths for uint;
 
@@ -47,6 +46,8 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
         uint size;      // the max size of each indivitual swap 
         uint sold;      // the cumulative amount of the tokenIn tokens spent
         uint bought;    // the cumulative amount of the tokenOut tokens bought
+
+        uint lastSwapTimestamp; // timestamp of the last attempted/executed swap
     }
 
     struct UserInfo {
@@ -69,6 +70,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
     event Deposited(address indexed user, uint amount);
     event Withdrawn(address indexed user, uint amount);
     event Swapped(string side, uint spent, uint bought, uint slippage);
+    event SwapError(string reason);
     event MaxSlippageExceeded(string side, uint amountIn, uint amountOutMin, uint slippage);
 
 
@@ -444,7 +446,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
 
     //// STRATEGY EXECUTION ////
 
-    // KeeperCompatibleInterface  //
+    // AutomationCompatibleInterface  //
     function checkUpkeep(bytes calldata /* checkData */) external view override returns (bool upkeepNeeded, bytes memory performData) {
        return  ( (twapSwaps.sold < twapSwaps.total) || strategy.shouldPerformUpkeep(), "");
     }
@@ -463,26 +465,27 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
     }
 
     function handleTwapSwaps() internal {
+        
         uint size = (twapSwaps.total > twapSwaps.sold + twapSwaps.size) ? twapSwaps.size : 
                     (twapSwaps.total > twapSwaps.sold) ? twapSwaps.total - twapSwaps.sold : 0;
+        
         if (size > 0) {
             (uint sold, uint bought, uint slippage) = swapIfNotExcessiveSlippage(twapSwaps, size);
 
+            twapSwaps.lastSwapTimestamp = block.timestamp;
+            string memory side = (twapSwaps.side == StrategyAction.BUY) ? "BUY" : 
+                        (twapSwaps.side == StrategyAction.SELL) ? "SELL" : "NONE";
             if (sold > 0 && bought > 0) {
                 twapSwaps.sold += sold;
                 twapSwaps.bought += bought;
-
-                string memory side = (twapSwaps.side == StrategyAction.BUY) ? "BUY" : 
-                                     (twapSwaps.side == StrategyAction.SELL) ? "SELL" : "NONE";
-                                    
                 if (twapSwaps.sold == twapSwaps.total) { 
                     // log that the twap swap has been fully executed
                     SwapInfo memory info = swapInfo(side, twapSwaps.sold, twapSwaps.bought);
                     swaps.push(info);
                 }
-
-                emit Swapped(side, sold, bought, slippage);
             }
+
+            emit Swapped(side, sold, bought, slippage);
 
         }
     }
@@ -535,7 +538,15 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
         if (amountIn > 0 && amountOutMin > 0) {
             IERC20Metadata token = tokenIn == address(depositToken) ?  depositToken : investToken;
             token.approve(address(swapRouter), amountIn);
-            amountOut = swapRouter.swap(tokenIn, tokenOut, amountIn, amountOutMin, recipent, feeV3);
+            try swapRouter.swap(tokenIn, tokenOut, amountIn, amountOutMin, recipent, feeV3) returns (uint received) {
+                amountOut = received;
+            }  catch Error(string memory reason) {
+                // log catch failing revert() and require()
+                emit SwapError(reason);
+            } catch (bytes memory reason) {
+                // catch failing assert()
+                emit SwapError(string(reason));
+            }
         }
     }
 
@@ -568,7 +579,8 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
             total: amountIn,
             size: amountIn,
             sold: 0,
-            bought: 0
+            bought: 0,
+            lastSwapTimestamp: 0
         });
 
         // determine the size of each chunk
@@ -586,7 +598,8 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
             total: amountIn,
             size: size == 0 ? amountIn : size,
             sold: 0,
-            bought: 0
+            bought: 0,
+            lastSwapTimestamp: 0
         });
     }
 
@@ -597,16 +610,17 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
      * @param pendingSwap the info about the TWAP swap being processed. 
      * @param size the amount of tokens to sell. Expected to be > 0 
     */ 
-    function swapIfNotExcessiveSlippage(TWAPSwap memory pendingSwap, uint size) internal returns (uint sold, uint bought, uint slippage) {
+    function swapIfNotExcessiveSlippage(TWAPSwap memory pendingSwap, uint size) internal returns (uint sold, uint bought, uint slppgg) {
        
         // ensure max slippage is not exceeded
-        (uint amountOutMin, uint slpg) = slippagePercentage(pendingSwap.tokenIn, pendingSwap.tokenOut, size);
+        (uint amountOutMin, uint slippage) = slippagePercentage(pendingSwap.tokenIn, pendingSwap.tokenOut, size);
       
         if (slippage > slippageThereshold || amountOutMin == 0) {
             string memory side = (pendingSwap.side == StrategyAction.BUY) ? "BUY" : 
                                  (pendingSwap.side == StrategyAction.SELL) ? "SELL" : "NONE";
             emit MaxSlippageExceeded(side, size, amountOutMin, slippage);
-            return (0, 0, slpg);
+
+            return (0, 0, slippage);
         }
 
         uint depositTokenBalanceBefore = depositToken.balanceOf(address(this));
@@ -627,7 +641,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, KeeperCompatibleInterface, Ownable 
             bought = depositTokenBalanceAfter - depositTokenBalanceBefore;
         }
 
-        return (sold, bought, slpg);
+        return (sold, bought, slippage);
     }
 
 

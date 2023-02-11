@@ -27,7 +27,7 @@ const config : HardhatUserConfig = {
     sources: './contracts',
     tests: './test',
     cache: './cache',
-    artifacts: './build/artifacts',
+    artifacts: './artifacts',
   },
 
   abiExporter: {
@@ -43,6 +43,7 @@ const config : HardhatUserConfig = {
     noColors: true,
     showTimeSpent: true,
     currency: 'USD',
+    gasPrice: 200
   },
 
   networks: {

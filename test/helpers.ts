@@ -84,7 +84,7 @@ export const fromUnits = (amount: BigNumber, decimals: Number, precision: Number
     const precisionFactor =  BigNumber.from('10').pow(BigNumber.from(precision)); 
     const number = BigNumber.from(amount).mul(precisionFactor).div(decimalsFactor)
 
-    const decimal = (number.toString().length > 17) ? 
+    const decimal = (number.toString().length > 15) ? 
         number.div(precisionFactor).toNumber()   :
         number.toNumber() / precisionFactor.toNumber()
 

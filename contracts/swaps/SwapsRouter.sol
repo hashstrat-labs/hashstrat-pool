@@ -83,6 +83,7 @@ contract SwapsRouter is ISwapsRouter, ReentrancyGuard, Ownable {
                 });
 
             ISwapRouter_Uniswap router = ISwapRouter_Uniswap(routerInfo.routerAddress);
+
             amountOut = router.exactInputSingle(params);
 
         } else if (routerInfo.routerVersion == RouterVersion.V3 && routerInfo.routerType == RouterType.QuickSwap ) {

@@ -85,10 +85,10 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
     mapping (address => bool) usersMap;
 
     // Chainlink price feeds
-    AggregatorV3Interface public riskAssetFeed;
-    AggregatorV3Interface public stableAssetFeed;
+    AggregatorV3Interface public immutable riskAssetFeed;
+    AggregatorV3Interface public immutable stableAssetFeed;
     
-    ISwapsRouter public swapRouter;
+    ISwapsRouter public immutable swapRouter;
     IStrategy public strategy;
 
 
@@ -98,7 +98,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
     uint public slippageThereshold = 500; // allow for 5% slippage on swaps (aka should receive at least 95% of the expected token amount)
 
 
-    uint24 public feeV3;
+    uint24 public immutable feeV3;
     uint public swapMaxValue;
 
     constructor(
@@ -147,11 +147,13 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
 
     /// View Functions
 
-    function lpTokensValue (uint lpTokens) public view returns (uint) {
-        return lpToken.totalSupply() > 0 ? this.totalValue() * lpTokens / lpToken.totalSupply() : 0;
+
+    // Return the value of the given amount of LP tokens (in USD)
+    function lpTokensValue (uint amount) public view returns (uint) {
+        return lpToken.totalSupply() > 0 ? totalValue() * amount / lpToken.totalSupply() : 0;
     }
 
-
+    // Return the value of the assets for the account (in USD)
     function portfolioValue(address account) external view returns (uint) {
         // the value of the portfolio allocated to the user, espressed in deposit tokens
         uint precision = 10 ** uint(portfolioPercentageDecimals());
@@ -159,23 +161,23 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
     }
 
 
-    // Returns the % of the pool owned by _addr using 'priceFeed' decimals precision
-    function portfolioPercentage(address _addr) public view returns (uint) {
+    // Return the % of the pool owned by 'account' with the precision of the risk asset price feed decimals
+    function portfolioPercentage(address account) public view returns (uint) {
 
         if (lpToken.totalSupply() == 0) return 0;
 
-        return 10 ** uint(portfolioPercentageDecimals()) * lpToken.balanceOf(_addr) / lpToken.totalSupply();
+        return 10 ** uint(portfolioPercentageDecimals()) * lpToken.balanceOf(account) / lpToken.totalSupply();
     }
 
 
-    // returns the portfolio value in depositTokens
+    // Return the pool total value in USD
     function totalValue() public override view returns(uint) {
         return stableAssetValue() + riskAssetValue();
     }
 
 
     /** 
-    * @return value of the stable assets in the pool in USD
+    * @return value of the stable assets in the pool (in USD)
     */
     function stableAssetValue() public override view returns(uint) {
         ( /*uint80 roundID**/, int price, /*uint startedAt*/, /*uint timeStamp*/, /*uint80 answeredInRound*/) = stableAssetFeed.latestRoundData();
@@ -192,7 +194,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
 
 
     /** 
-    * @return value of the risk assets in the pool in USD
+    * @return value of the risk assets in the pool (in USD)
     */
     function riskAssetValue() public override view returns(uint) {
         ( /*uint80 roundID**/, int price, /*uint startedAt*/, /*uint timeStamp*/, /*uint80 answeredInRound*/) = riskAssetFeed.latestRoundData();
@@ -227,8 +229,9 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
         uint investTokenPerc = investTokenPercentage();
 
         // 1. Transfer deposit amount to the pool
-        depositToken.transferFrom(msg.sender, address(this), amount);
-            
+        bool transferred = depositToken.transferFrom(msg.sender, address(this), amount);
+        assert(transferred);
+
         deposits[msg.sender] += amount;
         totalDeposited += amount;
 
@@ -384,7 +387,8 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
             })
         );
 
-        depositToken.transfer(msg.sender, amountToWithdraw);
+        bool transferred = depositToken.transfer(msg.sender, amountToWithdraw);
+        assert(transferred);
 
         emit Withdrawn(msg.sender, amountToWithdraw);
     }
@@ -458,13 +462,13 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
     function performUpkeep(bytes calldata /* performData */) external override {
 
         if (twapSwaps.sold < twapSwaps.total) {
-            handleTwapSwaps();
+            handleTwapSwap();
         } else if ( strategy.shouldPerformUpkeep() ) {
             strategyExec();
         }
     }
 
-    function handleTwapSwaps() internal {
+    function handleTwapSwap() internal {
         
         uint size = (twapSwaps.total > twapSwaps.sold + twapSwaps.size) ? twapSwaps.size : 
                     (twapSwaps.total > twapSwaps.sold) ? twapSwaps.total - twapSwaps.sold : 0;
@@ -486,7 +490,6 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
             }
 
             emit Swapped(side, sold, bought, slippage);
-
         }
     }
    
@@ -519,8 +522,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
             require(price > 0, "PoolV4: negative price");
             twapSwaps = twapSwapsInfo(action, tokenIn, tokenOut, amountIn, uint(price), feed.decimals());
             
-            // exec swap
-            handleTwapSwaps();
+            handleTwapSwap();
         }
     }
 
@@ -654,7 +656,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
         // if received a negative price the return amountOutMin = 0 to avoid swap 
         if (price < 0) return (0, 0);
 
-        uint amountExpected;
+        uint amountExpected = 0;
 
         // swap USD => ETH
         if (tokenIn == address(depositToken) && tokenOut == address(investToken)) {
@@ -734,7 +736,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
     function collectFees(uint amount) public onlyOwner {
         uint fees = amount == 0 ? lpToken.balanceOf(address(this)) : amount;
         if (fees > 0) {
-            lpToken.transfer(msg.sender, fees);
+            assert(lpToken.transfer(msg.sender, fees));
             _withdrawLP(fees);
         }
     }

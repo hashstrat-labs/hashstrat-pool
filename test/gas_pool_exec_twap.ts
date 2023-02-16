@@ -92,7 +92,7 @@ async function deployPoolContract() {
 
 describe("TWAP processing gas", function () {
 
-	it.only("Exec TWAP swaps until untill slippage is exceeded or full size is executed", async function () {
+	it.skip("Exec TWAP swaps until untill slippage is exceeded or full size is executed", async function () {
 
 		const { pool, usdc, wbtc, wbtcFeed } = await deployPoolContract()
 

@@ -127,7 +127,7 @@ describe("PoolV4", function () {
             expect( fromUsdc(await pool.totalValue()) ).to.be.approximately(1000, 1);
 
             //user received LP tokens
-            expect( fromUsdc(await poolLPToken.balanceOf(addr1.address)) ).to.equal( 1000 );
+            expect( fromUsdc(await poolLPToken.balanceOf(addr1.address)) ).to.be.approximately( 1000, 1 );
 		});
 
 
@@ -154,7 +154,7 @@ describe("PoolV4", function () {
 
             expect( fromUsdc(await pool.totalDeposited()) ).to.equal( 3000 );
             expect( fromUsdc(await pool.stableAssetValue()) ).to.approximately(1200, 0.5);
-            expect( fromUsdc(await pool.riskAssetValue()) ).to.be.approximately(1800, 2);
+            expect( fromUsdc(await pool.riskAssetValue()) ).to.be.approximately(1800, 3);
             expect( fromUsdc(await pool.totalValue()) ).to.be.approximately(3000, 2);
 
         });
@@ -204,7 +204,7 @@ describe("PoolV4", function () {
 
             // expect 100 LP tokens
             const lpBalance1 = await poolLPToken.balanceOf(addr1.address)
-            expect(fromUsdc(lpBalance1)).to.be.equal( 100 )
+            expect(fromUsdc(lpBalance1)).to.be.approximately( 100, 0.1 )
     
             // Second deposit
             const secondDeposit = toUsdc('200') 
@@ -252,7 +252,7 @@ describe("PoolV4", function () {
 
             // verify addr1 LP tokens
             const lpBalance1 = await poolLPToken.balanceOf(addr1.address)
-            expect(fromUsdc(lpBalance1)).to.be.equal( 100 )
+            expect(fromUsdc(lpBalance1)).to.be.approximately( 100, 0.1 )
     
             // Second deposit
             const secondDeposit = toUsdc('200') 
@@ -274,10 +274,10 @@ describe("PoolV4", function () {
             // expect 100% portfolio allocation
             const precision = 10 ** 8
             const portfolioPercentage1 = (await pool.portfolioPercentage(addr1.address)).toNumber() * 100 / precision
-            expect( portfolioPercentage1 ).to.be.approximately( 33.33, 0.01 );
+            expect( portfolioPercentage1 ).to.be.approximately( 33.33, 0.03 );
 
             const portfolioPercentage2 = (await pool.portfolioPercentage(addr2.address)).toNumber() * 100 / precision
-            expect( portfolioPercentage2 ).to.be.approximately( 66.66, 0.02 );
+            expect( portfolioPercentage2 ).to.be.approximately( 66.66, 0.03 );
 
         })
 

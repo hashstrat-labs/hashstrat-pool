@@ -97,37 +97,27 @@ describe("Deposit processing gas", function () {
 		const [ signer, addr1 ] = await ethers.getSigners();
 		await transferFunds(1_000_000 * 10 ** usdc_decimals, addr1.address)
 	
-		const balance = await usdc.balanceOf(addr1.address)
-		console.log("addr1 balance: ", fromUsdc(balance))
-
 		const iterations = 10
+		const balance = await usdc.balanceOf(addr1.address)
 		const deposit = balance.div(iterations)
 
-		let totaGasUsed = BigNumber.from(0)
+		let totalGasUsed = BigNumber.from(0)
 		for (let i=0; i<iterations; i++) {
 			await usdc.connect(addr1).approve(pool.address, deposit)
 			const tx = await pool.connect(addr1).deposit(deposit)
 			const gasUsed = (await tx.wait()).gasUsed;
-			console.log(i, "deposit: ", fromUsdc(deposit)), ", balance: ", fromUsdc( await usdc.balanceOf(addr1.address) )
-			totaGasUsed = totaGasUsed.add(gasUsed)
-			console.log(i, "gasUsed: ", gasUsed.toString(), totaGasUsed.toString())
+			totalGasUsed = totalGasUsed.add(gasUsed)
 
 			await waitSeconds( 10 * 60 )
 		}
 
-		const avgGasUsed = totaGasUsed.div(iterations).toNumber()
-		console.log("avgGasUsed: ", avgGasUsed)
+		const avgGasUsed = totalGasUsed.div(iterations).toNumber()
+		console.log("avgGasUsed: ", avgGasUsed.toString())
 		
-		const [_, price] = await wbtcFeed.latestRoundData()
-		console.log("btc price: ", Math.round( price.toNumber() / 10 ** 8)  )
+		// const [_, price] = await wbtcFeed.latestRoundData()
+		// console.log("btc price: ", Math.round( price.toNumber() / 10 ** 8)  )
 
-		console.log("pool usdc balance: ", fromUsdc( await usdc.balanceOf(pool.address)))
-		console.log("pool btc balance: ", fromBtc( await wbtc.balanceOf(pool.address)))
-		console.log("pool value: ", fromUsdc( await pool.totalValue()))
-		console.log("pool risk asset: ", fromUsdc( await pool.riskAssetValue()))
-		console.log("pool stable asset: ", fromUsdc( await pool.stableAssetValue()))
-	
-		expect( avgGasUsed ).to.lessThan( 530_000 )
+		expect( avgGasUsed ).to.lessThan( 600_000 )
 
 	}).timeout(60_000);
 

@@ -50,7 +50,7 @@ const config : HardhatUserConfig = {
     hardhat: {
       forking: {
         url: RPC_URL_POLYGON_MAIN || "",
-        blockNumber: 38702537 // 38701099
+        blockNumber: 42001664  // 38702537 
       }
     },
     goerli: {

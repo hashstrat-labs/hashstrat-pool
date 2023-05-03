@@ -97,26 +97,37 @@ describe("TWAP ingtegration", function () {
 		const [ _, addr1 ] = await ethers.getSigners();
 		const twapInterval = (await pool.twapSwapInterval()).toNumber()
 
+		// set high slippage to avoid hitting max slippage
+		await pool.setSlippageThereshold(25 * 100) 
+
 		await transferFunds(1_000_000 * 10 ** usdc_decimals, addr1.address)
+
+		console.log("addr1 balance: ",  fromUsdc( await usdc.balanceOf(addr1.address) ))
 	
 		const balance = await usdc.balanceOf(addr1.address)
 		await usdc.connect(addr1).approve(pool.address, balance)
 		await pool.connect(addr1).deposit(balance)
 
-		let totaGasUsed = BigNumber.from(0)
+		const iterations = 100
+		let totalGasUsed = BigNumber.from(0)
 
-		for (let i=0; i<100; i++) {
+		for (let i=0; i<iterations; i++) {
 			await waitSeconds(twapInterval)
 			expect( (await pool.checkUpkeep(new Int8Array())).upkeepNeeded ).is.true
 
 			// exec strategy
 			const tx = await pool.performUpkeep(new Int8Array())
 			const gasUsed = (await tx.wait()).gasUsed;
-			totaGasUsed = totaGasUsed.add(gasUsed)
+			totalGasUsed = totalGasUsed.add(gasUsed)
+
+			console.log("i: ", i, "gasUsed", gasUsed.toString())
 		}
 
-		const avgGasUsed = totaGasUsed.div(100).toNumber()
-		expect( avgGasUsed ).to.lessThan( 350_000 )
+		const avgGasUsed = totalGasUsed.div(iterations).toNumber()
+		console.log("avgGasUsed: ", avgGasUsed.toString(), "totalGasUsed", totalGasUsed.toString())
+
+		expect( avgGasUsed ).to.lessThan( 400_000 )
+		
 	}).timeout(60_000);
 
 
@@ -227,7 +238,6 @@ describe("TWAP ingtegration", function () {
 		expect( upkpeedNeeded ).is.false
 		 
 	}).timeout(60_000);
-
 
 });
 

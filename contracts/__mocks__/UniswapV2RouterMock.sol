@@ -96,26 +96,26 @@ contract UniswapV2RouterMock is ReentrancyGuard, IUniswapV2Router {
 
         if (path[0] == address(depositToken)) {
             // swap USD => ETH
-            assert(depositToken.transferFrom(msg.sender, address(this), amountIn));
+            depositToken.transferFrom(msg.sender, address(this), amountIn);
 
             amountOut = amountIn.div(price,
                 depositToken.decimals(), investTokenFeed.decimals(), investToken.decimals()
             ) * (10000 - uint(slippage)) / 10000;
 
             require(investToken.balanceOf(address(this)) >= amountOut, "Mock UniswapV2: Not enough risk assets");
-            assert(investToken.transfer(to, amountOut));
+            investToken.transfer(to, amountOut);
             emit Swapped("BOUGHT", amountIn, amountOut, price, slippage);
 
         } else if (path[0] == address(investToken)) {
             // swap ETH => USD
-            assert(investToken.transferFrom(msg.sender, address(this), amountIn));
+            investToken.transferFrom(msg.sender, address(this), amountIn);
 
             amountOut = amountIn.mul(price,    // * price / pricePrecision * (10000 - uint(slippage)) / 10000;
                 investToken.decimals(), depositTokenFeed.decimals(),  depositToken.decimals()
             ) * (10000 - uint(slippage)) / 10000;
 
             require(depositToken.balanceOf(address(this)) >= amountOut, "Mock UniswapV2: Not enough stable asset");
-            assert(depositToken.transfer(to, amountOut));
+            depositToken.transfer(to, amountOut);
             emit Swapped("SOLD", amountIn, amountOut, price, slippage);
         }
 

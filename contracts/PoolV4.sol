@@ -17,6 +17,8 @@ import "./strategies/IStrategy.sol";
 import "./swaps/IUniswapV2Router.sol";
 import "./swaps/ISwapsRouter.sol";
 
+import "hardhat/console.sol";
+
 /**
  * The contract of the HashStrat Pool. A pool is a digital valult that holds:
  * - A risk asset (e.g WETH or WBTC), also called invest token.
@@ -35,12 +37,8 @@ import "./swaps/ISwapsRouter.sol";
  * Large swaps are broken into up to 256 smaller chunks and executed over a period of time to reduce slippage.
  */
 
-contract PoolV4 is
-    IPoolV4,
-    ReentrancyGuard,
-    AutomationCompatibleInterface,
-    Ownable
-{
+contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Ownable {
+
     using TokenMaths for uint256;
 
     enum UserOperation {
@@ -91,12 +89,7 @@ contract PoolV4 is
     event Swapped(string side, uint256 sold, uint256 bought, uint256 slippage);
     event SwapError(string reason);
     event InvalidAmount();
-    event MaxSlippageExceeded(
-        string side,
-        uint256 amountIn,
-        uint256 amountOutMin,
-        uint256 slippage
-    );
+    event MaxSlippageExceeded(string side, uint256 amountIn, uint256 amountOutMin, uint256 slippage);
 
     uint256 public totalDeposited = 0;
     uint256 public totalWithdrawn = 0;
@@ -122,6 +115,8 @@ contract PoolV4 is
 
     uint24 public immutable feeV3;
     uint256 public swapMaxValue;
+
+    uint private lastTransactionTimestamp;
 
     constructor(
         address swapRouterAddress,
@@ -151,26 +146,21 @@ contract PoolV4 is
         swapMaxValue = swapValue;
     }
 
-    //// External functions //// 
+    //// External functions ////
 
     function deposit(uint256 amount) external override nonReentrant {
-        require(
-            depositToken.allowance(msg.sender, address(this)) >= amount,
-            "PoolV4: Insufficient allowance"
-        );
+        require(depositToken.allowance(msg.sender, address(this)) >= amount, "PoolV4: Insufficient allowance");
 
         if (amount == 0) return;
 
-        // portfolio allocation before the deposit
+        lastTransactionTimestamp = block.timestamp;
+
+        // 0. total asset value and risk asset allocation before receiving the deposit
+        uint valueBefore = totalValue();
         uint256 investTokenPerc = investTokenPercentage();
 
         // 1. Transfer deposit amount to the pool
-        bool transferred = depositToken.transferFrom(
-            msg.sender,
-            address(this),
-            amount
-        );
-        assert(transferred);
+        depositToken.transferFrom(msg.sender, address(this), amount);
 
         deposits[msg.sender] += amount;
         totalDeposited += amount;
@@ -189,35 +179,33 @@ contract PoolV4 is
             })
         );
 
-        // 2. Calculate LP tokens for this deposit that will be minted to the depositor
-        // Important: calculate 'depositLPTokens' AFTER the deposit tokens have been transferred to he pool
-        uint256 depositLPTokens = lpTokensForDeposit(amount);
-
+        // 2. Rebalance the pool to ensure the deposit does not alter the pool allocation
         if (lpToken.totalSupply() == 0) {
-            // if the pool was empty before this deposit => exec the strategy once to ensure the initial asset allocation
+            // if the pool was empty before this deposit => exec the strategy once to establish the initial asset allocation
             strategyExec();
         } else {
-            // if the pool was not empty before this deposit => ensure the pool remains balanced with this deposit.
-            // swap some of the deposit amount into investTokens to keep the pool balanced at current levels
-            // uint investTokenPerc = investTokenPercentage();
-            uint256 rebalanceAmountIn = (investTokenPerc * amount) /
-                (10**uint256(portfolioPercentageDecimals()));
-            uint256 amountOutMin = swapRouter.getAmountOutMin(
-                address(depositToken),
-                address(investToken),
-                rebalanceAmountIn,
-                feeV3
-            );
-            swap(
-                address(depositToken),
-                address(investToken),
-                rebalanceAmountIn,
-                amountOutMin,
-                address(this)
-            );
+            // if the pool was not empty before this deposit => ensure the pool remains balanced after this deposit.
+            uint256 rebalanceAmountIn = (investTokenPerc * amount) / (10**uint256(portfolioPercentageDecimals()));
+   
+            if (rebalanceAmountIn > 0) {
+                // performa a rebalance operation
+                (uint256 sold, uint256 bought, uint256 slippage) = swapIfNotExcessiveSlippage(
+                    address(depositToken),
+                    address(investToken),
+                    StrategyAction.BUY,
+                    rebalanceAmountIn
+                );
+                
+                require(sold > 0 && bought > 0, "PoolV4: swap error");
+                emit Swapped("BUY", sold, bought, slippage);
+            }
         }
 
-        // 3. Mint LP tokens to the user
+        // 3. Calculate LP tokens for this deposit that will be minted to the depositor based on the value in the pool AFTER the swaps
+        uint valueAfter = totalValue();
+        uint256 depositLPTokens = lpTokensForDeposit(valueAfter - valueBefore);
+
+        // 4. Mint LP tokens to the user
         lpToken.mint(msg.sender, depositLPTokens);
 
         emit Deposited(msg.sender, amount);
@@ -263,29 +251,29 @@ contract PoolV4 is
 
     // Withdraw the given amount of LP token fees in deposit tokens
     function collectFees(uint256 amount) external onlyOwner {
-        uint256 fees = amount == 0 ? lpToken.balanceOf(address(this)) : amount;
-        if (fees > 0) {
-            assert(lpToken.transfer(msg.sender, fees));
-            _withdrawLP(fees);
+        uint256 lpAmount = amount == 0 ? lpToken.balanceOf(address(this)) : amount;
+        if (lpAmount > 0) {
+            lpToken.transfer(msg.sender, lpAmount);
+            _withdrawLP(lpAmount);
         }
     }
 
     /**
-     *  Handle a pending swap, if there is one, othewise run the strategy.
+     *  Handle a pending swap if there is one, othewise run the strategy.
      */
-    function performUpkeep(
-        bytes calldata /* performData */
-    ) external override {
+    function performUpkeep(bytes calldata /* performData */) external override {
         if (
-            twapSwaps.sold < twapSwaps.total &&
+            (twapSwaps.sold < twapSwaps.total) &&
             (block.timestamp >= twapSwaps.lastSwapTimestamp + twapSwapInterval)
         ) {
             handleTwapSwap();
-        } else if (strategy.shouldPerformUpkeep()) {
+        } else if (
+            (twapSwaps.sold == twapSwaps.total) && 
+            strategy.shouldPerformUpkeep()
+        ) {
             strategyExec();
         }
     }
-
 
     // External view functions //
 
@@ -294,19 +282,10 @@ contract PoolV4 is
      *  1. The current twap swap was fully executed AND enough time has elapsed since the last time the twap swap was processed
      *  2. The strategy should run
      */
-    function checkUpkeep(
-        bytes calldata /* checkData */
-    )
-        external
-        view
-        override
-        returns (bool upkeepNeeded, bytes memory performData)
-    {
+    function checkUpkeep(bytes calldata /* checkData */) external view override returns (bool upkeepNeeded, bytes memory performData) {
         return (
-            (twapSwaps.sold < twapSwaps.total &&
-                (block.timestamp >=
-                    twapSwaps.lastSwapTimestamp + twapSwapInterval)) ||
-                strategy.shouldPerformUpkeep(),
+            ( (twapSwaps.sold < twapSwaps.total) && (block.timestamp >= twapSwaps.lastSwapTimestamp + twapSwapInterval) ) ||
+            ( twapSwaps.sold == twapSwaps.total && strategy.shouldPerformUpkeep() ),
             ""
         );
     }
@@ -319,14 +298,9 @@ contract PoolV4 is
         return users;
     }
 
-    function getUserInfos(address account)
-        external
-        view
-        returns (UserInfo[] memory)
-    {
+    function getUserInfos(address account) external view returns (UserInfo[] memory) {
         return userInfos[account];
     }
-
 
     // Return the value of the assets for the account (in USD)
     function portfolioValue(address account) external view returns (uint256) {
@@ -334,7 +308,6 @@ contract PoolV4 is
         uint256 precision = 10**uint256(portfolioPercentageDecimals());
         return (totalValue() * portfolioPercentage(account)) / precision;
     }
-
 
     //// Public view functions ////
 
@@ -359,11 +332,7 @@ contract PoolV4 is
      * @return amount, in LP tokens, that 'account' would pay to withdraw 'lpToWithdraw' LP tokens.
      */
 
-    function feesForWithdraw(uint256 lpToWithdraw, address account)
-        public
-        view
-        returns (uint256)
-    {
+    function feesForWithdraw(uint256 lpToWithdraw, address account) public view returns (uint256) {
         return
             (feesPerc * gainsPerc(account) * lpToWithdraw) /
             (10**(2 * uint256(feesPercDecimals)));
@@ -376,8 +345,8 @@ contract PoolV4 is
     function gainsPerc(address account) public view returns (uint256) {
         // if the address has no deposits (e.g. LPs were transferred from original depositor)
         // then consider the entire LP value as gains.
-        // This is to prevent tax avoidance by withdrawing the LPs to different addresses
-        if (deposits[account] == 0) return 10**uint256(feesPercDecimals); // 100% gains
+        // This is to prevent fee avoidance by withdrawing the LPs to different addresses
+        if (deposits[account] == 0) return 10**uint256(feesPercDecimals); // 100% of LP tokens are taxable
 
         // take into account for staked LP when calculating the value held in the pool
         uint256 stakedLP = address(daoTokenFarm) != address(0)
@@ -440,14 +409,7 @@ contract PoolV4 is
 
         if (price <= 0) return 0;
 
-        uint256 value = depositToken.balanceOf(address(this)).mul(
-            uint256(price),
-            depositToken.decimals(),
-            stableAssetFeed.decimals(),
-            depositToken.decimals()
-        );
-
-        return value;
+        return depositToken.balanceOf(address(this)).mul(uint256(price), depositToken.decimals(), stableAssetFeed.decimals(), depositToken.decimals());
     }
 
     /**
@@ -464,18 +426,10 @@ contract PoolV4 is
         ) = riskAssetFeed.latestRoundData();
         if (price <= 0) return 0;
 
-        uint256 value = investToken.balanceOf(address(this)).mul(
-            uint256(price),
-            investToken.decimals(),
-            riskAssetFeed.decimals(),
-            depositToken.decimals()
-        );
-
-        return value;
+        return investToken.balanceOf(address(this)).mul(uint256(price), investToken.decimals(), riskAssetFeed.decimals(), depositToken.decimals());
     }
 
-
-    //// Internal Functions //// 
+    //// Internal Functions ////
 
     function investTokenPercentage() internal view returns (uint256) {
         return
@@ -489,13 +443,9 @@ contract PoolV4 is
         return riskAssetFeed.decimals();
     }
 
-
     // calculate the LP tokens for a deposit of 'amount' tokens after the deposit tokens have been transferred into the pool
-    function lpTokensForDeposit(uint256 amount)
-        internal
-        view
-        returns (uint256)
-    {
+    function lpTokensForDeposit(uint256 amount) internal view returns (uint256) {
+
         uint256 depositLPTokens;
         if (lpToken.totalSupply() == 0) {
             /// If pool is empty  => allocate the inital LP tokens amount to the user
@@ -514,14 +464,11 @@ contract PoolV4 is
             //      P: Percentage of portfolio accounted by this deposit
             //      T: total LP tokens allocated before this deposit
 
-            depositLPTokens =
-                (portFolioPercentage * lpToken.totalSupply()) /
-                ((1 * lpPrecision) - portFolioPercentage);
+            depositLPTokens = (portFolioPercentage * lpToken.totalSupply()) / ((1 * lpPrecision) - portFolioPercentage);
         }
 
         return depositLPTokens;
     }
-
 
     /**
      * @notice Withdraw 'amount' of LP tokens from the pool and receive the equivalent amount of deposit tokens
@@ -530,6 +477,11 @@ contract PoolV4 is
      * @param amount the amount of LP tokent to withdraw
      */
     function collectFeeAndWithdraw(uint256 amount) internal {
+
+        require(lastTransactionTimestamp < block.timestamp, "PoolV4: Invalid withdrawal");
+
+        lastTransactionTimestamp = block.timestamp;
+
         uint256 fees = feesForWithdraw(amount, msg.sender);
         uint256 netAmount = amount - fees;
 
@@ -550,7 +502,7 @@ contract PoolV4 is
     function _withdrawLP(uint256 amount) internal {
         if (amount == 0) return;
 
-        require(amount <= lpToken.balanceOf(msg.sender), "LP balance exceeded");
+        require(amount <= lpToken.balanceOf(msg.sender), "PoolV4: LP balance exceeded");
 
         uint256 precision = 10**uint256(portfolioPercentageDecimals());
         uint256 withdrawPerc = (precision * amount) / lpToken.totalSupply();
@@ -558,36 +510,27 @@ contract PoolV4 is
         // 1. Calculate amount of depositTokens & investTokens to withdraw
         uint256 depositTokensBeforeSwap = depositToken.balanceOf(address(this));
         uint256 investTokensBeforeSwap = investToken.balanceOf(address(this));
-        //  if these are the last LP being withdrawn ensure no leftovers tokens in the pool due to dounding errors
-        bool isWithdrawingAll = (amount == lpToken.totalSupply());
-        uint256 withdrawDepositTokensAmount = isWithdrawingAll
-            ? depositTokensBeforeSwap
-            : (depositTokensBeforeSwap * withdrawPerc) / precision;
-        uint256 withdrawInvestTokensTokensAmount = isWithdrawingAll
-            ? investTokensBeforeSwap
-            : (investTokensBeforeSwap * withdrawPerc) / precision;
+        
+        // if these are the last LP being withdrawn ensure no dust tokens are left in the pool
+        bool isWithdrawAll = (amount == lpToken.totalSupply());
+        uint256 withdrawDepositTokensAmount = isWithdrawAll ? depositTokensBeforeSwap : (depositTokensBeforeSwap * withdrawPerc) / precision;
+        uint256 withdrawInvestTokensTokensAmount = isWithdrawAll ? investTokensBeforeSwap : (investTokensBeforeSwap * withdrawPerc) / precision;
 
         // 2. burn the user's LP tokens
         lpToken.burn(msg.sender, amount);
 
         // 3. swap some invest tokens back into deposit tokens
-        uint256 amountOutMin = swapRouter.getAmountOutMin(
-            address(investToken),
-            address(depositToken),
-            withdrawInvestTokensTokensAmount,
-            feeV3
-        );
-        uint256 depositTokensReceived = swap(
-            address(investToken),
-            address(depositToken),
-            withdrawInvestTokensTokensAmount,
-            amountOutMin,
-            address(this)
-        );
+        uint256 depositTokensReceived = 0;
+        if (withdrawInvestTokensTokensAmount > 0) {
+            uint256 amountOutMin = swapRouter.getAmountOutMin(address(investToken), address(depositToken), withdrawInvestTokensTokensAmount, feeV3);
+            (, uint256 slippage) = slippagePercentage(address(investToken), address(depositToken), withdrawInvestTokensTokensAmount);
+            depositTokensReceived = swap(address(investToken), address(depositToken), withdrawInvestTokensTokensAmount, amountOutMin, address(this));
+
+            emit Swapped("SELL", withdrawInvestTokensTokensAmount, depositTokensReceived, slippage);
+        }
 
         // 4. transfer depositTokens to the user
-        uint256 amountToWithdraw = withdrawDepositTokensAmount +
-            depositTokensReceived;
+        uint256 amountToWithdraw = withdrawDepositTokensAmount + depositTokensReceived;
 
         withdrawals[msg.sender] += amountToWithdraw;
         totalWithdrawn += amountToWithdraw;
@@ -599,8 +542,7 @@ contract PoolV4 is
             })
         );
 
-        bool transferred = depositToken.transfer(msg.sender, amountToWithdraw);
-        assert(transferred);
+        depositToken.transfer(msg.sender, amountToWithdraw);
 
         emit Withdrawn(msg.sender, amountToWithdraw);
     }
@@ -609,19 +551,19 @@ contract PoolV4 is
     // STRATEGY EXECUTION //
 
     function handleTwapSwap() internal {
+        
         // determine swap size avoiding very small change that would not be possible to swap
-        uint256 size = (twapSwaps.total > twapSwaps.sold + (2 * twapSwaps.size))
-            ? twapSwaps.size
-            : (twapSwaps.total > twapSwaps.sold)
-            ? twapSwaps.total - twapSwaps.sold
-            : 0;
+        uint256 size = (twapSwaps.total > twapSwaps.sold + (2 * twapSwaps.size)) ? twapSwaps.size
+            : (twapSwaps.total > twapSwaps.sold) ? twapSwaps.total - twapSwaps.sold : 0;
 
         if (size > 0) {
-            (
-                uint256 sold,
-                uint256 bought,
-                uint256 slippage
-            ) = swapIfNotExcessiveSlippage(twapSwaps, size);
+
+            (uint256 sold, uint256 bought, uint256 slippage) = swapIfNotExcessiveSlippage(
+                twapSwaps.tokenIn, 
+                twapSwaps.tokenOut, 
+                twapSwaps.side,
+                size
+            );
 
             twapSwaps.lastSwapTimestamp = block.timestamp;
             string memory side = (twapSwaps.side == StrategyAction.BUY)
@@ -699,28 +641,11 @@ contract PoolV4 is
      *          It does not check slippage and it's not expected to revert
      * @return amountOut the amount received from the swap
      */
-    function swap(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        uint256 amountOutMin,
-        address recipent
-    ) internal returns (uint256 amountOut) {
+    function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, address recipent) internal returns (uint256 amountOut) {
         if (amountIn > 0 && amountOutMin > 0) {
-            IERC20Metadata token = tokenIn == address(depositToken)
-                ? depositToken
-                : investToken;
+            IERC20Metadata token = tokenIn == address(depositToken) ? depositToken : investToken;
             token.approve(address(swapRouter), amountIn);
-            try
-                swapRouter.swap(
-                    tokenIn,
-                    tokenOut,
-                    amountIn,
-                    amountOutMin,
-                    recipent,
-                    feeV3
-                )
-            returns (uint256 received) {
+            try swapRouter.swap(tokenIn, tokenOut, amountIn, amountOutMin, recipent, feeV3) returns (uint256 received) {
                 amountOut = received;
             } catch Error(string memory reason) {
                 // log catch failing revert() and require()
@@ -739,24 +664,12 @@ contract PoolV4 is
      * If, for example, swapMaxValue is set to $20k, it would take 256 TWAP swaps to process a $5m swap.
      * A $1m Swap would be processed in 64 TWAP swaps of $15,625 each.
      */
-    function twapSwapsInfo(
-        StrategyAction side,
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        uint256 price,
-        uint8 feedDecimals
-    ) internal view returns (TWAPSwap memory) {
+    function twapSwapsInfo(StrategyAction side, address tokenIn, address tokenOut, uint256 amountIn, uint256 price, uint8 feedDecimals) internal view returns (TWAPSwap memory) {
         IERC20Metadata token = tokenIn == address(depositToken)
             ? depositToken
             : investToken;
 
-        uint256 swapValue = amountIn.mul(
-            uint256(price),
-            token.decimals(),
-            feedDecimals,
-            depositToken.decimals()
-        );
+        uint256 swapValue = amountIn.mul(uint256(price), token.decimals(), feedDecimals, depositToken.decimals());
 
         // if the value of the swap is less than swapMaxValue than we can swap in one go.
         // otherwise break the swap into chunks.
@@ -797,67 +710,54 @@ contract PoolV4 is
     /**
      * Perform a swap as part of processing a potentially larger TWAP swap.
      * if max slippage is exceeded the swap does not happen.
-     * @param pendingSwap the info about the TWAP swap being processed.
-     * @param size the amount of tokens to sell. Expected to be > 0
+     * @param tokenIn the token being sold
+     * @param tokenOut the token being bought
+     * @param side the side of the swap (e.g Buy or Sell)
+     * @param amountIn the amount of tokens to sell. Expected to be > 0
      */
-    function swapIfNotExcessiveSlippage(
-        TWAPSwap memory pendingSwap,
-        uint256 size
-    )
-        internal
-        returns (
+    function swapIfNotExcessiveSlippage (
+        address tokenIn,
+        address tokenOut,
+        StrategyAction side,
+        uint256 amountIn
+    ) internal returns (
             uint256 sold,
             uint256 bought,
             uint256 slppgg
         )
     {
         // ensure max slippage is not exceeded
-        (uint256 amountOutMin, uint256 slippage) = slippagePercentage(
-            pendingSwap.tokenIn,
-            pendingSwap.tokenOut,
-            size
-        );
+        (uint256 amountOutMin, uint256 slippage) = slippagePercentage(tokenIn, tokenOut, amountIn);
 
         if (slippage > slippageThereshold) {
-            string memory side = (pendingSwap.side == StrategyAction.BUY)
+            string memory sideName = (side == StrategyAction.BUY)
                 ? "BUY"
-                : (pendingSwap.side == StrategyAction.SELL)
+                : (side == StrategyAction.SELL)
                 ? "SELL"
                 : "NONE";
-            emit MaxSlippageExceeded(side, size, amountOutMin, slippage);
 
+            emit MaxSlippageExceeded(sideName, amountIn, amountOutMin, slippage);
             return (0, 0, slippage);
         }
 
+        // esnure swap returns some amount
         if (amountOutMin == 0) {
             emit InvalidAmount();
             return (0, 0, slippage);
         }
 
-        uint256 depositTokenBalanceBefore = depositToken.balanceOf(
-            address(this)
-        );
+        uint256 depositTokenBalanceBefore = depositToken.balanceOf(address(this));
         uint256 investTokenBalanceBefore = investToken.balanceOf(address(this));
 
-        // perform swap required to rebalance the portfolio
-        swap(
-            pendingSwap.tokenIn,
-            pendingSwap.tokenOut,
-            size,
-            amountOutMin,
-            address(this)
-        );
+        swap(tokenIn, tokenOut, amountIn, amountOutMin, address(this));
 
-        // token balances after swap
-        uint256 depositTokenBalanceAfter = depositToken.balanceOf(
-            address(this)
-        );
+        uint256 depositTokenBalanceAfter = depositToken.balanceOf(address(this));
         uint256 investTokenBalanceAfter = investToken.balanceOf(address(this));
 
-        if (pendingSwap.side == StrategyAction.BUY) {
+        if (side == StrategyAction.BUY) {
             sold = depositTokenBalanceBefore - depositTokenBalanceAfter;
             bought = investTokenBalanceAfter - investTokenBalanceBefore;
-        } else if (pendingSwap.side == StrategyAction.SELL) {
+        } else if (side == StrategyAction.SELL) {
             sold = investTokenBalanceBefore - investTokenBalanceAfter;
             bought = depositTokenBalanceAfter - depositTokenBalanceBefore;
         }
@@ -866,13 +766,9 @@ contract PoolV4 is
     }
 
     /**
-     * @return amountOutMin the amount of tokenOut received from the swap and slippage as a percentage with 4 digits decimals.
+     * @return amountOutMin the min amount of tokenOut to accept based on max allowed slippage from oracle prices
      */
-    function slippagePercentage(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn
-    ) internal returns (uint256 amountOutMin, uint256 slippage) {
+    function slippagePercentage(address tokenIn, address tokenOut, uint256 amountIn) internal returns (uint256 amountOutMin, uint256 slippage) {
         (
             ,
             /*uint80 roundID**/
@@ -888,63 +784,35 @@ contract PoolV4 is
         uint256 amountExpected = 0;
 
         // swap USD => ETH
-        if (
-            tokenIn == address(depositToken) && tokenOut == address(investToken)
-        ) {
-            amountExpected = amountIn.div(
-                uint256(price),
-                depositToken.decimals(),
-                riskAssetFeed.decimals(),
-                investToken.decimals()
-            ); // return value is in ETH (invest token decimals)
+        if (tokenIn == address(depositToken) && tokenOut == address(investToken)) {
+            amountExpected = amountIn.div(uint256(price), depositToken.decimals(), riskAssetFeed.decimals(), investToken.decimals());
         }
 
         // swap ETH => USD
-        if (
-            tokenIn == address(investToken) && tokenOut == address(depositToken)
-        ) {
-            amountExpected = amountIn.mul(
-                uint256(price),
-                investToken.decimals(),
-                riskAssetFeed.decimals(),
-                depositToken.decimals()
-            ); // return value is in USD (deposit token decimals)
+        if (tokenIn == address(investToken) && tokenOut == address(depositToken)) {
+            amountExpected = amountIn.mul(uint256(price), investToken.decimals(), riskAssetFeed.decimals(), depositToken.decimals());
         }
 
-        amountOutMin = swapRouter.getAmountOutMin(
-            tokenIn,
-            tokenOut,
-            amountIn,
-            feeV3
-        );
+        amountOutMin = swapRouter.getAmountOutMin(tokenIn, tokenOut, amountIn, feeV3);
 
         if (amountOutMin >= amountExpected) return (amountOutMin, 0);
 
         slippage = 10000 - ((10000 * amountOutMin) / amountExpected); // e.g 10000 - 9500 = 500  (5% slippage) - min slipage: 1 = 0.01%
 
-        uint256 minAmountAccepted = ((10000 - slippageThereshold) *
-            amountExpected) / 10000;
+        uint256 minAmountAccepted = ((10000 - slippageThereshold) * amountExpected) / 10000;
 
         // receive from the swap an amount of tokens compatible with our max slippage
-        amountOutMin = minAmountAccepted > amountOutMin
-            ? minAmountAccepted
-            : amountOutMin;
+        amountOutMin = minAmountAccepted > amountOutMin ? minAmountAccepted : amountOutMin;
     }
 
-    function swapInfo(
-        string memory side,
-        uint256 amountIn,
-        uint256 amountOut
-    ) internal view returns (SwapInfo memory) {
+    function swapInfo(string memory side, uint256 amountIn, uint256 amountOut) internal view returns (SwapInfo memory) {
         (
-            ,
-            /*uint80 roundID**/
-            int256 price, /*uint startedAt*/ /*uint80 answeredInRound*/
-            ,
-            ,
-
-        ) = /*uint timeStamp*/
-            riskAssetFeed.latestRoundData();
+            ,  /*uint80 roundID**/
+            int256 price,
+            , /*uint startedAt*/
+            ,  /*uint80 answeredInRound*/ 
+            /*uint timeStamp*/
+        ) = riskAssetFeed.latestRoundData();
 
         // Record swap info
         SwapInfo memory info = SwapInfo({

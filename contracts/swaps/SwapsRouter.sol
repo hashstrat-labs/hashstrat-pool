@@ -66,9 +66,8 @@ contract SwapsRouter is ISwapsRouter, ReentrancyGuard, Ownable {
         // transfer the tokens to this contract and aprove spend from the AMM
         RouterInfo memory routerInfo = activeRouter();
 
-        bool transferred = IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn);
-        bool approved = IERC20(tokenIn).approve(address(routerInfo.routerAddress), amountIn);
-        assert (transferred && approved);
+        IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn);
+        IERC20(tokenIn).approve(address(routerInfo.routerAddress), amountIn);
 
         if (routerInfo.routerVersion == RouterVersion.V3 && routerInfo.routerType == RouterType.Uniswap ) {
             ISwapRouter_Uniswap.ExactInputSingleParams memory params = ISwapRouter_Uniswap

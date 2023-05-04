@@ -159,8 +159,8 @@ describe("TWAP ingtegration", function () {
 			
 			const swapEvents = events?.filter((x) => { return x.event === "Swapped" })
 			const swapEvent = swapEvents && swapEvents![swapEvents.length-1]
-			const sold = swapEvent?.args?.['sold']?.toNumber()
-			const bought = swapEvent?.args?.['bought']?.toNumber()
+			const sold = swapEvent?.args?.['sold']?.toNumber() ?? 0
+			const bought = swapEvent?.args?.['bought']?.toNumber() ?? 0
 
 			const slippageExceededEvents = events?.filter((x) => { return x.event === "MaxSlippageExceeded" })
 			const slippageExceededEvent = slippageExceededEvents && slippageExceededEvents![slippageExceededEvents.length-1]
@@ -168,11 +168,14 @@ describe("TWAP ingtegration", function () {
 			
 			const twapSwaps = await pool.twapSwaps()
 			const remaining = twapSwaps.total.sub(twapSwaps.sold)
-			console.log("-----", ++i, "iteration ---- sold: ", fromUsdc(sold), "bought: ", fromBtc(bought), " remaining: ", fromUsdc(remaining) )
+			const soldCum = fromUsdc(twapSwaps.sold)
+			console.log(++i, "sold: ", soldCum ,`(+${fromUsdc(sold)})`, "bought: ", fromBtc(bought), " remaining: ", fromUsdc(remaining) )
 
 			await waitSeconds( 10 * 60 )
 
 		} while (slippage === undefined)
+
+		console.log("slippage:", slippage)
 
 		expect( slippage >= MAX_SLIPPAGE ).to.be.true
 

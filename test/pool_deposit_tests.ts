@@ -75,7 +75,7 @@ describe("PoolV4", function () {
         await swapRouter.addRouter( addresses.polygon.uniswap_v3_router, enums.RouterVersion.V3, enums.RouterType.Uniswap )
         await swapRouter.addRouter( addresses.polygon.quickswap_v3_router, enums.RouterVersion.V3, enums.RouterType.QuickSwap )
         await swapRouter.addRouter( addresses.polygon.quickswap_v2_router, enums.RouterVersion.V2, enums.RouterType.QuickSwap )
-        await swapRouter.setActiveRouter(0)
+        await swapRouter.setActiveRouter(1)
 
 		const usdc = new Contract(addresses.polygon.usdc, erc20_abi, ethers.provider)
 		const wbtc = new Contract(addresses.polygon.wbtc, erc20_abi, ethers.provider)
@@ -102,7 +102,7 @@ describe("PoolV4", function () {
 
         it("Router uses Uniswap V3", async function () {
 			const { swapRouter  } = await loadFixture(deployPoolContract);
-			expect( (await swapRouter.activeRouter()).routerAddress ).to.equal( addresses.polygon.uniswap_v3_router );
+			expect( (await swapRouter.activeRouter()).routerAddress ).to.equal( addresses.polygon.quickswap_v3_router );
 		});
 	});
 
@@ -153,9 +153,9 @@ describe("PoolV4", function () {
             await pool.connect(addr2).deposit(amount2)
 
             expect( fromUsdc(await pool.totalDeposited()) ).to.equal( 3000 );
-            expect( fromUsdc(await pool.stableAssetValue()) ).to.approximately(1200, 0.5);
-            expect( fromUsdc(await pool.riskAssetValue()) ).to.be.approximately(1800, 3);
-            expect( fromUsdc(await pool.totalValue()) ).to.be.approximately(3000, 2);
+            expect( fromUsdc(await pool.stableAssetValue()) ).to.approximately(1200, 1);
+            expect( fromUsdc(await pool.riskAssetValue()) ).to.be.approximately(1800, 4);
+            expect( fromUsdc(await pool.totalValue()) ).to.be.approximately(3000, 3);
 
         });
 

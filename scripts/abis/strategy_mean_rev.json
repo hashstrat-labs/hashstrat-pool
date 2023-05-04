@@ -1,0 +1,415 @@
+[
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "poolAddress",
+                "type": "address"
+            },
+            {
+                "internalType": "address",
+                "name": "stableAssetFeedAddress",
+                "type": "address"
+            },
+            {
+                "internalType": "address",
+                "name": "riskAssetFeedAddress",
+                "type": "address"
+            },
+            {
+                "internalType": "address",
+                "name": "stableAssetAddress",
+                "type": "address"
+            },
+            {
+                "internalType": "address",
+                "name": "riskAssetAddress",
+                "type": "address"
+            },
+            {
+                "internalType": "uint256",
+                "name": "_movingAveragePeriod",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "_initialMeanValue",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "_minAllocationPerc",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "_targetPricePercUp",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "_targetPricePercDown",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "_tokensToSwapPerc",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "constructor"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "previousOwner",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "newOwner",
+                "type": "address"
+            }
+        ],
+        "name": "OwnershipTransferred",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": false,
+                "internalType": "enum StrategyAction",
+                "name": "action",
+                "type": "uint8"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "amountIn",
+                "type": "uint256"
+            }
+        ],
+        "name": "StrategyEval",
+        "type": "event"
+    },
+    {
+        "inputs": [],
+        "name": "depositToken",
+        "outputs": [
+            {
+                "internalType": "contract IERC20Metadata",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "description",
+        "outputs": [
+            {
+                "internalType": "string",
+                "name": "",
+                "type": "string"
+            }
+        ],
+        "stateMutability": "pure",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "ma",
+                "type": "uint256"
+            },
+            {
+                "internalType": "int256",
+                "name": "price",
+                "type": "int256"
+            }
+        ],
+        "name": "eval",
+        "outputs": [
+            {
+                "internalType": "enum StrategyAction",
+                "name": "action",
+                "type": "uint8"
+            },
+            {
+                "internalType": "uint256",
+                "name": "amountIn",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "exec",
+        "outputs": [
+            {
+                "internalType": "enum StrategyAction",
+                "name": "action",
+                "type": "uint8"
+            },
+            {
+                "internalType": "uint256",
+                "name": "amountIn",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "investToken",
+        "outputs": [
+            {
+                "internalType": "contract IERC20Metadata",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "lastEvalTimestamp",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "minAllocationPerc",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "movingAverage",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "movingAveragePeriod",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "name",
+        "outputs": [
+            {
+                "internalType": "string",
+                "name": "",
+                "type": "string"
+            }
+        ],
+        "stateMutability": "pure",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "owner",
+        "outputs": [
+            {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "pool",
+        "outputs": [
+            {
+                "internalType": "contract IPoolV4",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "renounceOwnership",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "riskAssetFeed",
+        "outputs": [
+            {
+                "internalType": "contract AggregatorV3Interface",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "_poolAddress",
+                "type": "address"
+            }
+        ],
+        "name": "setPool",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "interval",
+                "type": "uint256"
+            }
+        ],
+        "name": "setUpkeepInterval",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "shouldPerformUpkeep",
+        "outputs": [
+            {
+                "internalType": "bool",
+                "name": "",
+                "type": "bool"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "stableAssetFeed",
+        "outputs": [
+            {
+                "internalType": "contract AggregatorV3Interface",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "targetPricePercDown",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "targetPricePercUp",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "tokensToSwapPerc",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "newOwner",
+                "type": "address"
+            }
+        ],
+        "name": "transferOwnership",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "upkeepInterval",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    }
+]

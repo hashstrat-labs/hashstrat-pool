@@ -1,0 +1,286 @@
+[
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "quoterUniswapAddress",
+                "type": "address"
+            },
+            {
+                "internalType": "address",
+                "name": "quoterQuickswapAddress",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "constructor"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "previousOwner",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "newOwner",
+                "type": "address"
+            }
+        ],
+        "name": "OwnershipTransferred",
+        "type": "event"
+    },
+    {
+        "inputs": [],
+        "name": "activeRouter",
+        "outputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "address",
+                        "name": "routerAddress",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "enum SwapsRouter.RouterVersion",
+                        "name": "routerVersion",
+                        "type": "uint8"
+                    },
+                    {
+                        "internalType": "enum SwapsRouter.RouterType",
+                        "name": "routerType",
+                        "type": "uint8"
+                    }
+                ],
+                "internalType": "struct SwapsRouter.RouterInfo",
+                "name": "",
+                "type": "tuple"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "activeRouterIdx",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "routerAddress",
+                "type": "address"
+            },
+            {
+                "internalType": "enum SwapsRouter.RouterVersion",
+                "name": "routerVersion",
+                "type": "uint8"
+            },
+            {
+                "internalType": "enum SwapsRouter.RouterType",
+                "name": "routerType",
+                "type": "uint8"
+            }
+        ],
+        "name": "addRouter",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "tokenIn",
+                "type": "address"
+            },
+            {
+                "internalType": "address",
+                "name": "tokenOut",
+                "type": "address"
+            },
+            {
+                "internalType": "uint256",
+                "name": "amountIn",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint24",
+                "name": "feeV3",
+                "type": "uint24"
+            }
+        ],
+        "name": "getAmountOutMin",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "amountOut",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "getRouters",
+        "outputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "address",
+                        "name": "routerAddress",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "enum SwapsRouter.RouterVersion",
+                        "name": "routerVersion",
+                        "type": "uint8"
+                    },
+                    {
+                        "internalType": "enum SwapsRouter.RouterType",
+                        "name": "routerType",
+                        "type": "uint8"
+                    }
+                ],
+                "internalType": "struct SwapsRouter.RouterInfo[]",
+                "name": "",
+                "type": "tuple[]"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "owner",
+        "outputs": [
+            {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "renounceOwnership",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "name": "routers",
+        "outputs": [
+            {
+                "internalType": "address",
+                "name": "routerAddress",
+                "type": "address"
+            },
+            {
+                "internalType": "enum SwapsRouter.RouterVersion",
+                "name": "routerVersion",
+                "type": "uint8"
+            },
+            {
+                "internalType": "enum SwapsRouter.RouterType",
+                "name": "routerType",
+                "type": "uint8"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "routerIndex",
+                "type": "uint256"
+            }
+        ],
+        "name": "setActiveRouter",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "tokenIn",
+                "type": "address"
+            },
+            {
+                "internalType": "address",
+                "name": "tokenOut",
+                "type": "address"
+            },
+            {
+                "internalType": "uint256",
+                "name": "amountIn",
+                "type": "uint256"
+            },
+            {
+                "internalType": "uint256",
+                "name": "amountOutMin",
+                "type": "uint256"
+            },
+            {
+                "internalType": "address",
+                "name": "recipient",
+                "type": "address"
+            },
+            {
+                "internalType": "uint24",
+                "name": "feeV3",
+                "type": "uint24"
+            }
+        ],
+        "name": "swap",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "amountOut",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "newOwner",
+                "type": "address"
+            }
+        ],
+        "name": "transferOwnership",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    }
+]

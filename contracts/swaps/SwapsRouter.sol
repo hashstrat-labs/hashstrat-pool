@@ -155,42 +155,6 @@ contract SwapsRouter is ISwapsRouter, ReentrancyGuard, Ownable {
     }
 
 
-
-    // function swapV2(
-    //     address tokenIn,
-    //     address tokenOut,
-    //     uint256 amountIn,
-    //     uint256 amountOutMin,
-    //     address recipient
-    // ) internal returns (uint256 amountOut) {
-
-    //     RouterInfo memory routerInfo = activeRouter();
-
-    //     // allow the uniswapv2 router to spend the token we just sent to this contract
-    //     IERC20(tokenIn).approve(address(routerInfo.routerAddress), amountIn);
-
-    //     // path is an array of addresses and we assume there is a direct pair btween the in and out tokens
-    //     address[] memory path = new address[](2);
-    //     path[0] = tokenIn;
-    //     path[1] = tokenOut;
-
-    //     // the deadline is the latest time the trade is valid for
-    //     // for the deadline we will pass in block.timestamp
-    //     IUniswapV2Router uniswapV2Router = IUniswapV2Router(routerInfo.routerAddress);
-    //     uint256[] memory amounstOut = uniswapV2Router.swapExactTokensForTokens(
-    //         amountIn,
-    //         amountOutMin,
-    //         path,
-    //         recipient,
-    //         block.timestamp
-    //     );
-
-    //     amountOut = amounstOut[amounstOut.length - 1];
-    // }
-
-
-
-
     //// ONLY OWNER ////
 
     function addRouter(address routerAddress,  RouterVersion routerVersion, RouterType routerType) public onlyOwner {

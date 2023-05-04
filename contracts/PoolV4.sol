@@ -17,7 +17,6 @@ import "./strategies/IStrategy.sol";
 import "./swaps/IUniswapV2Router.sol";
 import "./swaps/ISwapsRouter.sol";
 
-import "hardhat/console.sol";
 
 /**
  * The contract of the HashStrat Pool. A pool is a digital valult that holds:
@@ -42,6 +41,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
     using TokenMaths for uint256;
 
     enum UserOperation {
+        NONE,
         DEPOSIT,
         WITHDRAWAL
     }
@@ -111,7 +111,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
     // Swap data
     TWAPSwap public twapSwaps; // the pending swap
     SwapInfo[] public swaps; // logs of compteted swaps
-    uint256 public slippageThereshold = 500; // allow for 5% slippage on swaps (aka should receive at least 95% of the expected token amount)
+    uint256 public slippageThereshold = 100; // allow for 1% slippage on swaps (aka should receive at least 99% of the expected token amount)
 
     uint24 public immutable feeV3;
     uint256 public swapMaxValue;
@@ -155,7 +155,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
 
         lastTransactionTimestamp = block.timestamp;
 
-        // 0. total asset value and risk asset allocation before receiving the deposit
+        // 0. Get the total asset value and the perc allocated to the risk asset before receiving the deposit
         uint valueBefore = totalValue();
         uint256 investTokenPerc = investTokenPercentage();
 
@@ -189,24 +189,23 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
    
             if (rebalanceAmountIn > 0) {
                 // performa a rebalance operation
-                (uint256 sold, uint256 bought, uint256 slippage) = swapIfNotExcessiveSlippage(
+                (uint256 sold, uint256 bought, ) = swapIfNotExcessiveSlippage(
                     address(depositToken),
                     address(investToken),
                     StrategyAction.BUY,
                     rebalanceAmountIn
                 );
-                
+
                 require(sold > 0 && bought > 0, "PoolV4: swap error");
-                emit Swapped("BUY", sold, bought, slippage);
             }
         }
 
         // 3. Calculate LP tokens for this deposit that will be minted to the depositor based on the value in the pool AFTER the swaps
         uint valueAfter = totalValue();
-        uint256 depositLPTokens = lpTokensForDeposit(valueAfter - valueBefore);
+        uint256 lpToMint = lpTokensForDeposit(valueAfter - valueBefore);
 
         // 4. Mint LP tokens to the user
-        lpToken.mint(msg.sender, depositLPTokens);
+        lpToken.mint(msg.sender, lpToMint);
 
         emit Deposited(msg.sender, amount);
     }
@@ -259,33 +258,34 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
     }
 
     /**
-     *  Handle a pending swap if there is one, othewise run the strategy.
+     *  Run the strategy if needed otherwise process the TWAP swap if there is one in progress.
+     *  Important: strategy exeution must take priority over an incompleted TWAP swap. 
      */
     function performUpkeep(bytes calldata /* performData */) external override {
-        if (
+        if (strategy.shouldPerformUpkeep()) {
+            strategyExec();
+        } else if (
             (twapSwaps.sold < twapSwaps.total) &&
             (block.timestamp >= twapSwaps.lastSwapTimestamp + twapSwapInterval)
         ) {
             handleTwapSwap();
-        } else if (
-            (twapSwaps.sold == twapSwaps.total) && 
-            strategy.shouldPerformUpkeep()
-        ) {
-            strategyExec();
         }
     }
+
 
     // External view functions //
 
     /**
      * Perfor upkeep if:
-     *  1. The current twap swap was fully executed AND enough time has elapsed since the last time the twap swap was processed
-     *  2. The strategy should run
+     *  1. The current TWAP swap has not fully executed AND enough time has elapsed since the last time the TWAP swap was processed.
+     *  2. The strategy should run 
+     * NOTE: Let the strategy run even if the TWAP swap has not completed.
+     *       This assumes the strategy execution interval provides enough time to large swaps to execute and allows to recover from stuck swap.
      */
     function checkUpkeep(bytes calldata /* checkData */) external view override returns (bool upkeepNeeded, bytes memory performData) {
         return (
             ( (twapSwaps.sold < twapSwaps.total) && (block.timestamp >= twapSwaps.lastSwapTimestamp + twapSwapInterval) ) ||
-            ( twapSwaps.sold == twapSwaps.total && strategy.shouldPerformUpkeep() ),
+             strategy.shouldPerformUpkeep(),
             ""
         );
     }
@@ -448,13 +448,13 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
 
         uint256 depositLPTokens;
         if (lpToken.totalSupply() == 0) {
-            /// If pool is empty  => allocate the inital LP tokens amount to the user
+            // If pool is empty  => allocate the inital LP tokens amount to the user
             depositLPTokens = amount;
         } else {
-            ///// if there are already LP tokens => calculate the additional LP tokens for this deposit
+            // if there are already LP tokens => calculate the additional LP tokens for this deposit
             // calculate portfolio % of the deposit (using lpPrecision digits precision)
             uint256 lpPrecision = 10**uint256(lpToken.decimals());
-            uint256 portFolioPercentage = (lpPrecision * amount) / totalValue();
+            uint256 depositPercentage = (lpPrecision * amount) / totalValue();
 
             // calculate the amount of LP tokens for the deposit so that they represent
             // a % of the existing LP tokens equivalent to the % value of this deposit to the whole portfolio value.
@@ -464,7 +464,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
             //      P: Percentage of portfolio accounted by this deposit
             //      T: total LP tokens allocated before this deposit
 
-            depositLPTokens = (portFolioPercentage * lpToken.totalSupply()) / ((1 * lpPrecision) - portFolioPercentage);
+            depositLPTokens = (depositPercentage * lpToken.totalSupply()) / ((1 * lpPrecision) - depositPercentage);
         }
 
         return depositLPTokens;
@@ -550,15 +550,23 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
 
     // STRATEGY EXECUTION //
 
+    /**
+     * Process the current twapSwaps and logs SwapInfo when the swap completes. 
+     * It determine the size of the swap based on the desired TWAP swap size
+     */
     function handleTwapSwap() internal {
         
-        // determine swap size avoiding very small change that would not be possible to swap
+        // determine swap size avoiding very small amounts that would not be possible to swap
+        // end ensuring the whole total amount gets swapped
         uint256 size = (twapSwaps.total > twapSwaps.sold + (2 * twapSwaps.size)) ? twapSwaps.size
             : (twapSwaps.total > twapSwaps.sold) ? twapSwaps.total - twapSwaps.sold : 0;
 
-        if (size > 0) {
-
-            (uint256 sold, uint256 bought, uint256 slippage) = swapIfNotExcessiveSlippage(
+        string memory side = (twapSwaps.side == StrategyAction.BUY) ? "BUY" : 
+                             (twapSwaps.side == StrategyAction.SELL) ? "SELL" : "NONE";
+            
+        if (IERC20Metadata(twapSwaps.tokenIn).balanceOf(address(this)) >= size && size > 0) {
+            // continue processing the TWAP swap
+            (uint256 sold, uint256 bought, ) = swapIfNotExcessiveSlippage(
                 twapSwaps.tokenIn, 
                 twapSwaps.tokenOut, 
                 twapSwaps.side,
@@ -566,35 +574,31 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
             );
 
             twapSwaps.lastSwapTimestamp = block.timestamp;
-            string memory side = (twapSwaps.side == StrategyAction.BUY)
-                ? "BUY"
-                : (twapSwaps.side == StrategyAction.SELL)
-                ? "SELL"
-                : "NONE";
+            twapSwaps.sold += sold;
+            twapSwaps.bought += bought;
 
-            if (sold > 0 && bought > 0) {
-                twapSwaps.sold += sold;
-                twapSwaps.bought += bought;
-                if (twapSwaps.sold == twapSwaps.total) {
-                    // log that the twap swap has been fully executed
-                    SwapInfo memory info = swapInfo(
-                        side,
-                        twapSwaps.sold,
-                        twapSwaps.bought
-                    );
-                    swaps.push(info);
-                }
-            }
+        } else {
+            // end the TWAP swap if the pool does not have enough tokenIn tokens to continue (e.g. due to withdrawals)
+            twapSwaps.total = twapSwaps.sold;
+        }
 
-            emit Swapped(side, sold, bought, slippage);
+        // store swap info whrn the swap completd
+        if (twapSwaps.sold == twapSwaps.total) {
+            // log that the twap swap has been fully executed
+            SwapInfo memory info = swapInfo(
+                side,
+                twapSwaps.sold,
+                twapSwaps.bought
+            );
+            swaps.push(info);
         }
     }
 
     /**
-     * Exec the trategy and set a swap if needed
+     * Exec the strategy and start a TWAP swap if a swap is needed
      */
     function strategyExec() internal {
-        // ask the strategy if a swap should happen
+
         (StrategyAction action, uint256 amountIn) = strategy.exec();
 
         if (action != StrategyAction.NONE && amountIn > 0) {
@@ -642,9 +646,12 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
      * @return amountOut the amount received from the swap
      */
     function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, address recipent) internal returns (uint256 amountOut) {
+        
+        require (IERC20Metadata(tokenIn).balanceOf(address(this)) >= amountIn, "PoolV4: insufficient balance");
+
         if (amountIn > 0 && amountOutMin > 0) {
-            IERC20Metadata token = tokenIn == address(depositToken) ? depositToken : investToken;
-            token.approve(address(swapRouter), amountIn);
+            // allow the router to spend the tokens
+            IERC20Metadata(tokenIn).approve(address(swapRouter), amountIn);
             try swapRouter.swap(tokenIn, tokenOut, amountIn, amountOutMin, recipent, feeV3) returns (uint256 received) {
                 amountOut = received;
             } catch Error(string memory reason) {
@@ -729,37 +736,36 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
         // ensure max slippage is not exceeded
         (uint256 amountOutMin, uint256 slippage) = slippagePercentage(tokenIn, tokenOut, amountIn);
 
-        if (slippage > slippageThereshold) {
-            string memory sideName = (side == StrategyAction.BUY)
-                ? "BUY"
-                : (side == StrategyAction.SELL)
-                ? "SELL"
-                : "NONE";
+        string memory sideName = (side == StrategyAction.BUY)
+            ? "BUY"
+            : (side == StrategyAction.SELL)
+            ? "SELL"
+            : "NONE";
 
+        if (slippage > slippageThereshold) {
             emit MaxSlippageExceeded(sideName, amountIn, amountOutMin, slippage);
             return (0, 0, slippage);
         }
 
-        // esnure swap returns some amount
-        if (amountOutMin == 0) {
-            emit InvalidAmount();
-            return (0, 0, slippage);
-        }
+        // esnure to receive some tokens back
+        if (amountOutMin > 0) {
+            uint256 depositTokenBalanceBefore = depositToken.balanceOf(address(this));
+            uint256 investTokenBalanceBefore = investToken.balanceOf(address(this));
 
-        uint256 depositTokenBalanceBefore = depositToken.balanceOf(address(this));
-        uint256 investTokenBalanceBefore = investToken.balanceOf(address(this));
+            swap(tokenIn, tokenOut, amountIn, amountOutMin, address(this));
 
-        swap(tokenIn, tokenOut, amountIn, amountOutMin, address(this));
+            uint256 depositTokenBalanceAfter = depositToken.balanceOf(address(this));
+            uint256 investTokenBalanceAfter = investToken.balanceOf(address(this));
 
-        uint256 depositTokenBalanceAfter = depositToken.balanceOf(address(this));
-        uint256 investTokenBalanceAfter = investToken.balanceOf(address(this));
+            if (side == StrategyAction.BUY) {
+                sold = depositTokenBalanceBefore - depositTokenBalanceAfter;
+                bought = investTokenBalanceAfter - investTokenBalanceBefore;
+            } else if (side == StrategyAction.SELL) {
+                sold = investTokenBalanceBefore - investTokenBalanceAfter;
+                bought = depositTokenBalanceAfter - depositTokenBalanceBefore;
+            }
 
-        if (side == StrategyAction.BUY) {
-            sold = depositTokenBalanceBefore - depositTokenBalanceAfter;
-            bought = investTokenBalanceAfter - investTokenBalanceBefore;
-        } else if (side == StrategyAction.SELL) {
-            sold = investTokenBalanceBefore - investTokenBalanceAfter;
-            bought = depositTokenBalanceAfter - depositTokenBalanceBefore;
+            emit Swapped(sideName, sold, bought, slippage);
         }
 
         return (sold, bought, slippage);

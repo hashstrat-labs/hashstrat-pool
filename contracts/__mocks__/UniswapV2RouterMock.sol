@@ -8,6 +8,8 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "../swaps/IUniswapV2Router.sol";
 import "../TokenMaths.sol";
 
+import "hardhat/console.sol";
+
 /**
     Mock implementation of swap functionality and price feed via the interfaces:
     - UniswapV2Router to swap depositTokens into investTokens

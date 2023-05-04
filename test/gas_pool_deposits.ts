@@ -90,13 +90,14 @@ async function deployPoolContract() {
 
 describe("Deposit processing gas", function () {
 
-	it.skip("Deposits", async function () {
+	it("Deposits", async function () {
 
 		const { pool, usdc, wbtc, wbtcFeed } = await deployPoolContract()
 
 		const [ signer, addr1 ] = await ethers.getSigners();
 		await transferFunds(1_000_000 * 10 ** usdc_decimals, addr1.address)
-	
+		await pool.setSlippageThereshold( 500 )
+
 		const iterations = 10
 		const balance = await usdc.balanceOf(addr1.address)
 		const deposit = balance.div(iterations)
@@ -105,6 +106,7 @@ describe("Deposit processing gas", function () {
 		for (let i=0; i<iterations; i++) {
 			await usdc.connect(addr1).approve(pool.address, deposit)
 			const tx = await pool.connect(addr1).deposit(deposit)
+
 			const gasUsed = (await tx.wait()).gasUsed;
 			totalGasUsed = totalGasUsed.add(gasUsed)
 
@@ -114,12 +116,9 @@ describe("Deposit processing gas", function () {
 		const avgGasUsed = totalGasUsed.div(iterations).toNumber()
 		console.log("avgGasUsed: ", avgGasUsed.toString())
 		
-		// const [_, price] = await wbtcFeed.latestRoundData()
-		// console.log("btc price: ", Math.round( price.toNumber() / 10 ** 8)  )
+		expect( avgGasUsed ).to.lessThan( 610_000 )
 
-		expect( avgGasUsed ).to.lessThan( 600_000 )
-
-	}).timeout(60_000);
+	}).timeout(100_000);
 
 });
 

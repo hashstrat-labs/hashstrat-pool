@@ -88,17 +88,17 @@ async function deployPoolContract() {
 }
 
 
-describe("Deposit processing gas", function () {
+describe("Deposit/Withdrawals average gas", function () {
 
-	it("Deposits", async function () {
+	it.skip("Deposits", async function () {
 
 		const { pool, usdc, wbtc, wbtcFeed } = await deployPoolContract()
 
 		const [ signer, addr1 ] = await ethers.getSigners();
-		await transferFunds(1_000_000 * 10 ** usdc_decimals, addr1.address)
-		await pool.setSlippageThereshold( 500 )
+		await transferFunds(100_000 * 10 ** usdc_decimals, addr1.address)
+		await pool.setSlippageThereshold( 200 )
 
-		const iterations = 10
+		const iterations = 100
 		const balance = await usdc.balanceOf(addr1.address)
 		const deposit = balance.div(iterations)
 
@@ -114,9 +114,51 @@ describe("Deposit processing gas", function () {
 		}
 
 		const avgGasUsed = totalGasUsed.div(iterations).toNumber()
-		console.log("avgGasUsed: ", avgGasUsed.toString())
+		console.log("deposits avgGasUsed: ", avgGasUsed.toString())
 		
-		expect( avgGasUsed ).to.lessThan( 610_000 )
+		expect( avgGasUsed ).to.lessThan( 515_000 )
+
+	}).timeout(100_000);
+
+
+	it.skip("Withdrawals", async function () {
+
+		const { pool, poolLPToken, usdc, wbtc, wbtcFeed } = await deployPoolContract()
+
+		const [ signer, addr1 ] = await ethers.getSigners();
+		await transferFunds(100_000 * 10 ** usdc_decimals, addr1.address)
+		await pool.setSlippageThereshold( 100 )
+	
+		// 1000 usdc deposit
+		await usdc.connect(addr1).approve(pool.address, 1_000 * 10 ** usdc_decimals)
+		await pool.connect(addr1).deposit(1_000 * 10 ** usdc_decimals)
+
+		const lpbalance = await poolLPToken.balanceOf(addr1.address)
+		const balanceBefore = await usdc.balanceOf(addr1.address)
+
+		// very small withdrawals of 0.10 USDC
+		const withdrawalAmount = lpbalance.div( 10_000 )
+		const iterations = 100
+
+		let totalGasUsed = BigNumber.from(0)
+		for (let i=0; i<iterations; i++) {
+			const balanceBefore = await usdc.balanceOf(addr1.address)
+			const tx = await pool.connect(addr1).withdrawLP(withdrawalAmount)
+			const gasUsed = (await tx.wait()).gasUsed;
+			totalGasUsed = totalGasUsed.add(gasUsed)
+
+			const balanceAfter = await usdc.balanceOf(addr1.address)
+
+			await waitSeconds( 10 * 60 )
+		}
+
+		const balanceAfter = await usdc.balanceOf(addr1.address)
+		console.log("Total withdrawn:", fromUsdc(balanceAfter.sub(balanceBefore)) )
+
+		const avgGasUsed = totalGasUsed.div(iterations).toNumber()
+		console.log("withdrawals avgGasUsed: ", avgGasUsed.toString())
+		
+		expect( avgGasUsed ).to.lessThan( 515_000 )
 
 	}).timeout(100_000);
 

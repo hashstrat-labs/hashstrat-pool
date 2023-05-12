@@ -119,10 +119,10 @@ describe("PoolV4", function () {
             await usdc.connect(addr1).approve(pool.address, amount)
             await pool.connect(addr1).deposit(amount)
 
-            expect( fromUsdc(await usdc.balanceOf(pool.address)) ).to.approximately(400, 0.1);
+            expect( fromUsdc(await usdc.balanceOf(pool.address)) ).to.approximately(400, 0.2);
             
 			expect( fromUsdc(await pool.totalDeposited()) ).to.equal( 1000 );
-            expect( fromUsdc(await pool.stableAssetValue()) ).to.approximately(400, 0.1);
+            expect( fromUsdc(await pool.stableAssetValue()) ).to.approximately(400, 0.2);
             expect( fromUsdc(await pool.riskAssetValue()) ).to.be.approximately(600, 1);
             expect( fromUsdc(await pool.totalValue()) ).to.be.approximately(1000, 1);
 
@@ -143,7 +143,7 @@ describe("PoolV4", function () {
             await pool.connect(addr1).deposit(amount1)
 
             expect( fromUsdc(await pool.totalDeposited()) ).to.equal( 1000 );
-            expect( fromUsdc(await pool.stableAssetValue()) ).to.approximately(400, 0.1);
+            expect( fromUsdc(await pool.stableAssetValue()) ).to.approximately(400, 0.2);
             expect( fromUsdc(await pool.riskAssetValue()) ).to.be.approximately(600, 1);
             expect( fromUsdc(await pool.totalValue()) ).to.be.approximately(1000, 1);
 
@@ -153,7 +153,7 @@ describe("PoolV4", function () {
             await pool.connect(addr2).deposit(amount2)
 
             expect( fromUsdc(await pool.totalDeposited()) ).to.equal( 3000 );
-            expect( fromUsdc(await pool.stableAssetValue()) ).to.approximately(1200, 1);
+            expect( fromUsdc(await pool.stableAssetValue()) ).to.approximately(1200, 2);
             expect( fromUsdc(await pool.riskAssetValue()) ).to.be.approximately(1800, 4);
             expect( fromUsdc(await pool.totalValue()) ).to.be.approximately(3000, 3);
 

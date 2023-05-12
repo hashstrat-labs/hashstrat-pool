@@ -126,7 +126,7 @@ describe("TWAP ingtegration", function () {
 		const avgGasUsed = totalGasUsed.div(iterations).toNumber()
 		console.log("avgGasUsed: ", avgGasUsed.toString(), "totalGasUsed", totalGasUsed.toString())
 
-		expect( avgGasUsed ).to.lessThan( 400_000 )
+		expect( avgGasUsed ).to.lessThan( 260_000 )
 		
 	}).timeout(60_000);
 
@@ -144,9 +144,13 @@ describe("TWAP ingtegration", function () {
 		await pool.connect(addr1).deposit(balance)
 
 		const MAX_SLIPPAGE = (await pool.slippageThereshold()).toNumber()
+		console.log("MAX_SLIPPAGE:", MAX_SLIPPAGE, "twapInterval: ", twapInterval)
 
-		let slippage = undefined
+		
 		let i=0;
+		let swapErrorEvent = undefined
+		let priorSwapTimestamp = 0
+
 		do {
 			await waitSeconds(twapInterval)
 			expect( (await pool.checkUpkeep(new Int8Array())).upkeepNeeded ).is.true
@@ -154,30 +158,35 @@ describe("TWAP ingtegration", function () {
 			// exec strategy
 			const tx = await pool.performUpkeep(new Int8Array())
 			const events = (await tx.wait()).events;
+
 			const swapInfo = await pool.twapSwaps()
 			expect( swapInfo.side ).is.equal(enums.ActionType.BUY)
-			
+			expect( swapInfo.lastSwapTimestamp ).is.greaterThan( priorSwapTimestamp )
+
 			const swapEvents = events?.filter((x) => { return x.event === "Swapped" })
 			const swapEvent = swapEvents && swapEvents![swapEvents.length-1]
 			const sold = swapEvent?.args?.['sold']?.toNumber() ?? 0
 			const bought = swapEvent?.args?.['bought']?.toNumber() ?? 0
 
-			const slippageExceededEvents = events?.filter((x) => { return x.event === "MaxSlippageExceeded" })
-			const slippageExceededEvent = slippageExceededEvents && slippageExceededEvents![slippageExceededEvents.length-1]
-			slippage = slippageExceededEvent?.args?.['slippage']?.toNumber()
-			
 			const twapSwaps = await pool.twapSwaps()
+
+			if (bought == 0) {
+				swapErrorEvent = events?.filter((x) => { return x.event === "SwapError" }).find( e => true)
+			}
+			
 			const remaining = twapSwaps.total.sub(twapSwaps.sold)
 			const soldCum = fromUsdc(twapSwaps.sold)
-			console.log(++i, "sold: ", soldCum ,`(+${fromUsdc(sold)})`, "bought: ", fromBtc(bought), " remaining: ", fromUsdc(remaining) )
+			console.log(++i, twapSwaps.lastSwapTimestamp.toNumber(), "sold: ", soldCum ,`(+${fromUsdc(sold)})`, "bought: ", fromBtc(bought), " remaining: ", fromUsdc(remaining) )
 
 			await waitSeconds( 10 * 60 )
 
-		} while (slippage === undefined)
+			priorSwapTimestamp = swapInfo.lastSwapTimestamp.toNumber()
 
-		console.log("slippage:", slippage)
+		} while (swapErrorEvent == undefined)
 
-		expect( slippage >= MAX_SLIPPAGE ).to.be.true
+
+		expect( swapErrorEvent?.args?.['reason'] ).is.equal( 'Too little received' )
+
 
 	}).timeout(60_000);
 
@@ -186,7 +195,7 @@ describe("TWAP ingtegration", function () {
 
 		const { pool, usdc, wbtc } = await deployPoolContract()
 
-		// limit swap size to $1000
+		// limit swap size to $100
 		await pool.setSwapMaxValue(100 * 10 ** 6)
 		const twapInterval = (await pool.twapSwapInterval()).toNumber()
 
@@ -218,8 +227,14 @@ describe("TWAP ingtegration", function () {
 
 			const twapSwaps = await pool.twapSwaps()
 			remaining = twapSwaps.total.sub(twapSwaps.sold).toNumber()
+			
+			expect ( sold ).to.not.be.undefined
+			expect ( bought ).to.not.be.undefined
 
-			console.log("-----", ++i, "swap ---- gas used : ", gasUsed.toString(), "sold: ", fromUsdc(sold), "bought: ", fromBtc(bought), " remaining: ", fromUsdc(remaining) )
+			expect ( sold ).to.be.greaterThan( 0 )
+			expect ( bought ).to.be.greaterThan( 0 )
+
+			console.log(++i, "swap ---- gas used : ", gasUsed.toString(), "sold: ", fromUsdc(sold), "bought: ", fromBtc(bought), " remaining: ", fromUsdc(remaining) )
 
 			await waitSeconds( 10 * 60 )
 

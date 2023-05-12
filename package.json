@@ -1,7 +1,7 @@
 {
   "name": "hashstrat-pool",
   "version": "0.0.1",
-  "description": "Pool contracts of the  HashStratp protocol",
+  "description": "Pool and Strategy contracts of the HashStratp protocol",
   "main": "index.js",
   "directories": {
     "test": "test"

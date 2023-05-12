@@ -95,3 +95,7 @@ export const toUnits = (amount: string | number, decimals: number = 18) => {
     const formatted = ethers.utils.parseUnits(amount.toString(), decimals)
     return formatted
 }
+
+export const delay = (ms: number) => {
+    return new Promise( resolve => setTimeout(resolve, ms) );
+}

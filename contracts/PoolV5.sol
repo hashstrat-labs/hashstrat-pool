@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.14;
 
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -8,9 +9,10 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AutomationCompatibleInterface.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
-import "./interfaces/IPoolV4.sol";
+import "./interfaces/IPoolV5.sol";
+import "./interfaces/IERC4626.sol";
 import "./interfaces/IDAOTokenFarm.sol";
-import "./PoolLPToken.sol";
+
 import "./libraries/TokenMaths.sol";
 
 import "./strategies/IStrategy.sol";
@@ -38,7 +40,13 @@ import "hardhat/console.sol";
  * Large swaps are broken into up to 256 smaller chunks and executed over a period of time to reduce slippage.
  */
 
-contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Ownable {
+contract PoolV5 is IPoolV5, ERC20, IERC4626, ReentrancyGuard, AutomationCompatibleInterface, Ownable {
+
+    event Deposited(address indexed user, uint256 amount);
+    event Withdrawn(address indexed user, uint256 amount);
+    event Swapped(string side, uint256 sold, uint256 bought, uint256 slippage);
+    event SwapError(string reason);
+
 
     using TokenMaths for uint256;
 
@@ -75,6 +83,23 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
         uint256 amount;
     }
 
+    struct PoolArgs {
+        string name;
+        string symbol;
+    
+        address swapRouterAddress;
+        address stableAssetFeedAddress;
+        address riskAssetFeedAddress;
+        address depositTokenAddress;
+        address investTokenAddress;
+        address strategyAddress;
+
+        uint256 poolFees;
+        uint24 uniswapV3Fee;
+        uint256 swapValue;
+    }
+
+
     uint256 public twapSwapInterval = 5 * 60; // 5 minutes between swaps
     uint8 public immutable feesPercDecimals = 4;
     uint256 public feesPerc; // using feePercDecimals precision (e.g 100 is 1%)
@@ -84,12 +109,6 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
     // Pool tokens
     IERC20Metadata public immutable depositToken;
     IERC20Metadata public immutable investToken;
-    PoolLPToken public immutable lpToken;
-
-    event Deposited(address indexed user, uint256 amount);
-    event Withdrawn(address indexed user, uint256 amount);
-    event Swapped(string side, uint256 sold, uint256 bought, uint256 slippage);
-    event SwapError(string reason);
 
     uint256 public totalDeposited = 0;
     uint256 public totalWithdrawn = 0;
@@ -118,107 +137,172 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
 
     uint private lastTransactionTimestamp;
 
+
     constructor(
-        address swapRouterAddress,
-        address stableAssetFeedAddress,
-        address riskAssetFeedAddress,
-        address depositTokenAddress,
-        address investTokenAddress,
-        address lpTokenAddress,
-        address strategyAddress,
-        uint256 poolFees,
-        uint24 uniswapV3Fee,
-        uint256 swapValue
-    ) {
-        swapRouter = ISwapsRouter(swapRouterAddress);
+        PoolArgs memory args
+    ) ERC20(args.name, args.symbol) {
 
-        stableAssetFeed = AggregatorV3Interface(stableAssetFeedAddress);
-        riskAssetFeed = AggregatorV3Interface(riskAssetFeedAddress);
+        swapRouter = ISwapsRouter(args.swapRouterAddress);
+        stableAssetFeed = AggregatorV3Interface(args.stableAssetFeedAddress);
+        riskAssetFeed = AggregatorV3Interface(args.riskAssetFeedAddress);
+        depositToken = IERC20Metadata(args.depositTokenAddress);
+        investToken = IERC20Metadata(args.investTokenAddress);
+        strategy = IStrategy(args.strategyAddress);
+        feesPerc = args.poolFees;
+        feeV3 = args.uniswapV3Fee;
 
-        depositToken = IERC20Metadata(depositTokenAddress);
-        investToken = IERC20Metadata(investTokenAddress);
-
-        lpToken = PoolLPToken(lpTokenAddress);
-        strategy = IStrategy(strategyAddress);
-        feesPerc = poolFees;
-        feeV3 = uniswapV3Fee;
-
-        swapMaxValue = swapValue;
+        swapMaxValue = args.swapValue;
     }
+
+
+
+    //// ERC4626 ////
+
+
+     /// @notice The address of the underlying token used for the Vault for accounting, depositing, and withdrawing.
+    function asseet() external view returns (address assetTokenAddress) {
+        return address(depositToken);
+    }
+
+
+    /// @notice Total amount of the underlying asset that is “managed” by Vault.
+    function totalAssets() public view returns(uint256) {
+
+        // price of 1 USDC in USD
+        ( , int256 price, , , ) = stableAssetFeed.latestRoundData();
+
+        uint riskAssetsUSDValue = riskAssetValue(); 
+
+        uint riskAssetsValueInDepositTokenAmount = riskAssetsUSDValue.div(uint256(price),
+            depositToken.decimals(),
+            stableAssetFeed.decimals(),
+            depositToken.decimals() // output decimals
+        );
+
+        return depositToken.balanceOf(address(this)) + riskAssetsValueInDepositTokenAmount;
+    }
+
+
+    /// @notice The amount of shares that the Vault would exchange for the amount of assets provided, in an ideal scenario where all the conditions are met.
+    function convertToShares(uint256 assets) external view returns(uint256 shares) {
+        shares = totalSupply() *  assets /  totalAssets();
+    }
+
+
+    /// @notice The amount of assets that the Vault would exchange for the amount of shares provided, in an ideal scenario where all the conditions are met.
+    function convertToAssets(uint256 shares) external view returns(uint256 assets) {
+        assets = totalSupply() > 0 ? totalAssets() * shares / totalSupply() : 0;
+    }
+
+
+    /// @notice Maximum amount of the underlying asset that can be deposited into the Vault for the receiver, through a deposit call.
+    function maxDeposit(address receiver) external view returns(uint256 maxAssets) {
+        maxAssets = ~uint(0);
+    }
+
+
+    /// @notice Allows an on-chain or off-chain user to simulate the effects of their deposit at the current block, given current on-chain conditions.
+    function previewDeposit(uint256 assets) external view returns(uint256 shares) {
+
+        ( , int256 price, , , ) = stableAssetFeed.latestRoundData();
+        if (price <= 0) return 0;
+
+        uint assetsValue = depositToken.balanceOf(address(this)).mul(uint256(price), 
+                depositToken.decimals(), 
+                stableAssetFeed.decimals(), 
+                depositToken.decimals()
+        );
+
+       shares = lpTokensForDeposit(assetsValue);
+    }
+
+    /// @notice Mints shares Vault shares to receiver by depositing exactly assets of underlying tokens.
+    /// @dev stateMutability: nonpayable
+
+    /// @notice Mints shares Vault shares to receiver by depositing exactly assets of underlying tokens.
+    /// @dev stateMutability: nonpayable
+    function deposit(uint256 assets, address receiver) external nonReentrant returns(uint256 shares) {
+        shares = _deposit(assets, receiver);
+    }
+
+    /// @notice Maximum amount of shares that can be minted from the Vault for the receiver, through a mint call.
+    function maxMint(address receiver) external view returns(uint256 maxShares) {
+        maxShares = ~uint(0);
+    }
+
+    /// @notice Allows an on-chain or off-chain user to simulate the effects of their mint at the current block, given current on-chain conditions.
+    function previewMint(address shares) external view returns(uint256 assets) {
+        
+    }
+
+
+    /// @notice Mints exactly shares Vault shares to receiver by depositing assets of underlying tokens.
+    function mint(uint256 shares, address receiver) external returns(uint256 assets) {
+
+    }
+
+
+    /// @notice Maximum amount of the underlying asset that can be withdrawn from the owner balance in the Vault, through a withdraw call.
+    function maxWithdraw(address owner) external view returns(uint256 maxAssets) {
+         maxAssets = ~uint(0);
+    }
+
+    /// @notice Allows an on-chain or off-chain user to simulate the effects of their withdrawal at the current block, given current on-chain conditions.
+    /// @return shares as close to and no fewer than the exact amount of Vault shares that would be burned in a withdraw call in the same transaction.
+    ///         I.e. withdraw should return the same or fewer shares as previewWithdraw if called in the same transaction.
+    function previewWithdraw(uint256 assets) external view returns(uint256 shares) {
+
+    }
+
+    /// @notice Burns shares from owner and sends exactly assets of underlying tokens to receiver.
+    function withdraw(uint256 assets, address receiver, address owner) external returns(uint256 shares) {
+
+    }
+ 
+    
+    /// @notice Maximum amount of Vault shares that can be redeemed from the owner balance in the Vault, through a redeem call.
+    /// @return maxShares the maximum amount of shares that could be transferred from owner through redeem and not cause a revert,
+    ///      which MUST NOT be higher than the actual maximum that would be accepted (it should underestimate if necessary).
+    function maxRedeem(address receiver) external view returns(uint256 maxShares) {
+        maxShares = ~uint(0);
+    }
+
+    /// @notice Allows an on-chain or off-chain user to simulate the effects of their redeemption at the current block, given current on-chain conditions.
+    /// @return assets as close to and no more than the exact amount of assets that would be withdrawn in a redeem call in the same transaction.
+    ///         I.e. redeem should return the same or more assets as previewRedeem if called in the same transaction.
+    function previewRedeem(uint256 shares) external view returns(uint256 assets) {
+
+        uint256 fees = feesForWithdraw(shares, msg.sender);
+        uint256 netShares = shares - fees;
+
+        assets = totalSupply() > 0 ? totalAssets() * netShares / totalSupply() : 0;
+    }
+
+    /// @notice Burns exactly shares from owner and sends assets of underlying tokens to receiver.
+    function redeem(uint256 shares, address receiver, address owner) external returns(uint256 assets) {
+        assets = collectFeeAndWithdraw(shares, receiver, owner);
+    }
+
+
+
+
+
 
     //// External functions ////
 
     function deposit(uint256 amount) external override nonReentrant {
-        require(depositToken.allowance(msg.sender, address(this)) >= amount, "PoolV4: Insufficient allowance");
-
-        if (amount == 0) return;
-
-        lastTransactionTimestamp = block.timestamp;
-
-        // 0. Get the total asset value and the perc allocated to the risk asset before receiving the deposit
-        uint valueBefore = totalValue();
-        uint256 investTokenPerc = investTokenPercentage();
-
-        // 1. Transfer deposit amount to the pool
-        depositToken.transferFrom(msg.sender, address(this), amount);
-
-        deposits[msg.sender] += amount;
-        totalDeposited += amount;
-
-        // and record user address (if new user) and deposit infos
-        if (!usersMap[msg.sender]) {
-            usersMap[msg.sender] = true;
-            users.push(msg.sender);
-        }
-
-        userInfos[msg.sender].push(
-            UserInfo({
-                timestamp: block.timestamp,
-                operation: UserOperation.DEPOSIT,
-                amount: amount
-            })
-        );
-
-        // 2. Rebalance the pool to ensure the deposit does not alter the pool allocation
-        if (lpToken.totalSupply() == 0) {
-            // if the pool was empty before this deposit => exec the strategy once to establish the initial asset allocation
-            strategyExec();
-        } else {
-            // if the pool was not empty before this deposit => ensure the pool remains balanced after this deposit.
-            uint256 rebalanceAmountIn = (investTokenPerc * amount) / (10**uint256(portfolioPercentageDecimals()));
-   
-            if (rebalanceAmountIn > 0) {
-                // performa a rebalance operation
-                (bool success, , , ) = swapAndCheckSlippage(
-                    address(depositToken),
-                    address(investToken),
-                    StrategyAction.BUY,
-                    rebalanceAmountIn
-                );
-
-                require(success, "PoolV4: swap error");
-            }
-        }
-
-        // 3. Calculate LP tokens for this deposit that will be minted to the depositor based on the value in the pool AFTER the swaps
-        uint valueAfter = totalValue();
-        uint256 lpToMint = lpTokensForDeposit(valueAfter - valueBefore);
-
-        // 4. Mint LP tokens to the user
-        lpToken.mint(msg.sender, lpToMint);
-
-        console.log(">>> deposit - lpToMint: ", lpToMint);
-
-        emit Deposited(msg.sender, amount);
+        _deposit(amount, msg.sender);
     }
 
     function withdrawAll() external nonReentrant {
-        collectFeeAndWithdraw(lpToken.balanceOf(msg.sender));
+        collectFeeAndWithdraw(balanceOf(msg.sender), msg.sender, msg.sender);
     }
 
-    function withdrawLP(uint256 amount) external nonReentrant {
-        collectFeeAndWithdraw(amount);
+    function withdrawLP(uint256 shares) external nonReentrant {
+        collectFeeAndWithdraw(shares,  msg.sender, msg.sender);
     }
+
+
 
     // onlyOwner functions //
 
@@ -251,11 +335,11 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
     }
 
     // Withdraw the given amount of LP token fees in deposit tokens
-    function collectFees(uint256 amount) external onlyOwner {
-        uint256 lpAmount = amount == 0 ? lpToken.balanceOf(address(this)) : amount;
+    function collectFees(uint256 shares) external onlyOwner {
+        uint256 lpAmount = shares == 0 ? balanceOf(address(this)) : shares;
         if (lpAmount > 0) {
-            lpToken.transfer(msg.sender, lpAmount);
-            _withdrawLP(lpAmount);
+            transfer(msg.sender, lpAmount);
+            _withdrawLP(lpAmount, msg.sender, msg.sender);
         }
     }
 
@@ -328,16 +412,14 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
      *             := fees_perc * gains_perc(account) * pool_value * lp_to_withdraw / lp_total_supply * lp_total_supply / pool_value
      *             := fees_perc * gains_perc(account) * lp_to_withdraw
      *
-     * @param lpToWithdraw the amount of LP tokens to withdraw
-     * @param account the account withdrawing the LP tokens
+     * @param shares the amount of LP tokens to withdraw
+     * @param owner the owner of the shares being withdrawn that will pay fees
      *
-     * @return amount, in LP tokens, that 'account' would pay to withdraw 'lpToWithdraw' LP tokens.
+     * @return sharesFee amount of shares that 'owner' will pay to withdraw 'shares'.
      */
 
-    function feesForWithdraw(uint256 lpToWithdraw, address account) public view returns (uint256) {
-        return
-            (feesPerc * gainsPerc(account) * lpToWithdraw) /
-            (10**(2 * uint256(feesPercDecimals)));
+    function feesForWithdraw(uint256 shares, address owner) public view returns (uint256 sharesFee) {
+        sharesFee = (feesPerc * gainsPerc(owner) * shares) / (10**(2 * uint256(feesPercDecimals)));
     }
 
     /**
@@ -352,10 +434,10 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
 
         // take into account for staked LP when calculating the value held in the pool
         uint256 stakedLP = address(daoTokenFarm) != address(0)
-            ? daoTokenFarm.getStakedBalance(account, address(lpToken))
+            ? daoTokenFarm.getStakedBalance(account, address(this))
             : 0;
         uint256 valueInPool = lpTokensValue(
-            lpToken.balanceOf(account) + stakedLP
+            balanceOf(account) + stakedLP
         );
 
         // check if accounts is in profit
@@ -372,7 +454,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
 
     // Return the value of the given amount of LP tokens (in USD)
     function lpTokensValue(uint256 amount) public view returns (uint256) {
-        return lpToken.totalSupply() > 0 ? (totalValue() * amount) / lpToken.totalSupply() : 0;
+        return totalSupply() > 0 ? (totalValue() * amount) / totalSupply() : 0;
     }
 
     // Return the % of the pool owned by 'account' with the precision of the risk asset price feed decimals
@@ -381,11 +463,11 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
         view
         returns (uint256)
     {
-        if (lpToken.totalSupply() == 0) return 0;
+        if (totalSupply() == 0) return 0;
 
         return
             (10**uint256(portfolioPercentageDecimals()) *
-                lpToken.balanceOf(account)) / lpToken.totalSupply();
+                balanceOf(account)) / totalSupply();
     }
 
     // Return the pool total value in USD
@@ -425,14 +507,88 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
         ) = riskAssetFeed.latestRoundData();
         if (price <= 0) return 0;
 
-        return investToken.balanceOf(address(this)).mul(uint256(price), investToken.decimals(), riskAssetFeed.decimals(), depositToken.decimals());
+        return investToken.balanceOf(address(this)).mul(uint256(price), 
+            investToken.decimals(), 
+            riskAssetFeed.decimals(), 
+            depositToken.decimals()
+        );
     }
+
+
 
     //// Internal Functions ////
 
+
+    function _deposit(uint256 assets, address receiver) internal returns(uint256 shares) {
+        require(depositToken.allowance(msg.sender, address(this)) >= assets, "PoolV5: Insufficient allowance");
+
+        if (assets == 0) return 0;
+
+        lastTransactionTimestamp = block.timestamp;
+
+        // 0. Get the total asset value and the perc allocated to the risk asset before receiving the deposit
+        uint valueBefore = totalValue();
+        uint256 investTokenPerc = investTokenPercentage();
+
+        // 1. Transfer deposit amount to the pool
+        depositToken.transferFrom(msg.sender, address(this), assets);
+
+        deposits[msg.sender] += assets;
+        totalDeposited += assets;
+
+        // and record user address (if new user) and deposit infos
+        if (!usersMap[msg.sender]) {
+            usersMap[msg.sender] = true;
+            users.push(msg.sender);
+        }
+
+        userInfos[msg.sender].push(
+            UserInfo({
+                timestamp: block.timestamp,
+                operation: UserOperation.DEPOSIT,
+                amount: assets
+            })
+        );
+
+        // 2. Rebalance the pool to ensure the deposit does not alter the pool allocation
+        if (totalSupply() == 0) {
+            // if the pool was empty before this deposit => exec the strategy once to establish the initial asset allocation
+            strategyExec();
+        } else {
+            // if the pool was not empty before this deposit => ensure the pool remains balanced after this deposit.
+            uint256 rebalanceAmountIn = (investTokenPerc * assets) / (10**uint256(portfolioPercentageDecimals()));
+   
+            if (rebalanceAmountIn > 0) {
+                // performa a rebalance operation
+                (bool success, , , ) = swapAndCheckSlippage(
+                    address(depositToken),
+                    address(investToken),
+                    StrategyAction.BUY,
+                    rebalanceAmountIn
+                );
+
+                require(success, "PoolV5: swap error");
+            }
+        }
+
+        // 3. Calculate LP tokens for this deposit that will be minted to the depositor based on the value in the pool AFTER the swaps
+        uint valueAfter = totalValue();
+        
+        shares = lpTokensForDeposit(valueAfter - valueBefore);
+
+        // 4. Mint LP tokens to the user
+        _mint(receiver, shares);
+
+        console.log(">>> deposit - lpToMint: ", shares);
+
+        emit Deposited(msg.sender, assets);
+
+    }
+
+
     function investTokenPercentage() internal view returns (uint256) {
         return
-            (lpToken.totalSupply() == 0)
+            (totalSupply() == 0)
                 ? 0
                 : (10**uint256(portfolioPercentageDecimals()) *
                     riskAssetValue()) / totalValue();
@@ -442,18 +598,18 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
         return riskAssetFeed.decimals();
     }
 
-    // calculate the LP tokens for a deposit of 'amount' tokens after the deposit tokens have been transferred into the pool
-    function lpTokensForDeposit(uint256 amount) internal view returns (uint256) {
+    // calculate the LP tokens for a the value of the deposit 'valueDeposited' tokens after the deposit tokens have been transferred into the pool
+    function lpTokensForDeposit(uint256 valueDeposited) internal view returns (uint256) {
 
         uint256 depositLPTokens;
-        if (lpToken.totalSupply() == 0) {
+        if (totalSupply() == 0) {
             // If pool is empty  => allocate the inital LP tokens amount to the user
-            depositLPTokens = amount;
+            depositLPTokens = valueDeposited * 10**decimals() / 10**depositToken.decimals();
         } else {
             // if there are already LP tokens => calculate the additional LP tokens for this deposit
             // calculate portfolio % of the deposit (using lpPrecision digits precision)
-            uint256 lpPrecision = 10**uint256(lpToken.decimals());
-            uint256 depositPercentage = (lpPrecision * amount) / totalValue();
+            uint256 lpPrecision = 10**uint256(decimals());
+            uint256 depositPercentage = (lpPrecision * valueDeposited) / totalValue();
 
             // calculate the amount of LP tokens for the deposit so that they represent
             // a % of the existing LP tokens equivalent to the % value of this deposit to the whole portfolio value.
@@ -463,7 +619,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
             //      P: Percentage of portfolio accounted by this deposit
             //      T: total LP tokens allocated before this deposit
 
-            depositLPTokens = (depositPercentage * lpToken.totalSupply()) / ((1 * lpPrecision) - depositPercentage);
+            depositLPTokens = (depositPercentage * totalSupply()) / ((1 * lpPrecision) - depositPercentage);
 
             console.log(">>>> lpTokensForDeposit: ", depositLPTokens, depositPercentage);
         }
@@ -477,48 +633,53 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
      *
      * @param amount the amount of LP tokent to withdraw
      */
-    function collectFeeAndWithdraw(uint256 amount) internal {
 
-        require(lastTransactionTimestamp < block.timestamp, "PoolV4: Invalid withdrawal");
+    /// @notice Burns exactly shares from owner and sends assets of underlying tokens to receiver.
+
+    function collectFeeAndWithdraw(uint256 shares, address receiver, address owner) internal returns (uint assets) { 
+
+        require(lastTransactionTimestamp < block.timestamp, "PoolV5: Invalid withdrawal");
 
         lastTransactionTimestamp = block.timestamp;
 
-        uint256 fees = feesForWithdraw(amount, msg.sender);
-        uint256 netAmount = amount - fees;
+        uint256 fees = feesForWithdraw(shares, owner);
+        uint256 netShares = shares - fees;
 
         // transfer fees to Pool by burning the and minting lptokens to the pool
         if (fees > 0) {
-            lpToken.burn(msg.sender, fees);
-            lpToken.mint(address(this), fees);
+            _burn(owner, fees);
+            _mint(address(this), fees);
         }
 
-        _withdrawLP(netAmount);
+        _withdrawLP(netShares, receiver, owner);
     }
 
     /**
      *   @notice Burns the 'amount' of LP tokens and sends to the sender the equivalent value in deposit tokens.
      *           If withdrawal producesa a swap with excessive slippage the transaction will be reverted.
-     *   @param amount the amount of LP tokent being withdrawn.
+     *   @param shares the amount of LP tokent being withdrawn.
+     *   @param receiver the receiver of the assets being withdrawn
+     *   @param owner the owner of the LP token being withdrawn.
      */
-    function _withdrawLP(uint256 amount) internal {
+    function _withdrawLP(uint256 shares, address receiver, address owner) internal returns (uint256 assets) {
         
-        if (amount == 0) return;
-        require(amount <= lpToken.balanceOf(msg.sender), "PoolV4: LP balance exceeded");
+        if (shares == 0) return 0;
+        require(shares <= balanceOf(owner), "PoolV5: LP balance exceeded");
 
         uint256 precision = 10**uint256(portfolioPercentageDecimals());
-        uint256 withdrawPerc = (precision * amount) / lpToken.totalSupply();
+        uint256 withdrawPerc = (precision * shares) / totalSupply();
 
         // 1. Calculate amount of depositTokens & investTokens to withdraw
         uint256 depositTokensBeforeSwap = depositToken.balanceOf(address(this));
         uint256 investTokensBeforeSwap = investToken.balanceOf(address(this));
         
         // if these are the last LP being withdrawn ensure no dust tokens are left in the pool
-        bool isWithdrawAll = (amount == lpToken.totalSupply());
+        bool isWithdrawAll = (shares == totalSupply());
         uint256 withdrawDepositTokensAmount = isWithdrawAll ? depositTokensBeforeSwap : (depositTokensBeforeSwap * withdrawPerc) / precision;
         uint256 withdrawInvestTokensTokensAmount = isWithdrawAll ? investTokensBeforeSwap : (investTokensBeforeSwap * withdrawPerc) / precision;
 
         // 2. burn the user's LP tokens
-        lpToken.burn(msg.sender, amount);
+        _burn(owner, shares);
 
         // 3. swap some invest tokens back into deposit tokens
         uint256 depositTokensReceived = 0;
@@ -536,27 +697,27 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
 
             // revert if swap failed and swap was above min value of $1
             // allow very small swaps that would otherwise fail due to slipppage
-            require(success || swapValue < 10 ** depositToken.decimals(), "PoolV4: swap error");
+            require(success || swapValue < 10 ** depositToken.decimals(), "PoolV5: swap error");
 
             depositTokensReceived = bought;
         }
 
         // 4. transfer depositTokens to the user
-        uint256 amountToWithdraw = withdrawDepositTokensAmount + depositTokensReceived;
+        assets = withdrawDepositTokensAmount + depositTokensReceived;
 
-        withdrawals[msg.sender] += amountToWithdraw;
-        totalWithdrawn += amountToWithdraw;
-        userInfos[msg.sender].push(
+        withdrawals[owner] += assets;
+        totalWithdrawn += assets;
+        userInfos[owner].push(
             UserInfo({
                 timestamp: block.timestamp,
                 operation: UserOperation.WITHDRAWAL,
-                amount: amountToWithdraw
+                amount: assets
             })
         );
 
-        depositToken.transfer(msg.sender, amountToWithdraw);
+        depositToken.transfer(receiver, assets);
 
-        emit Withdrawn(msg.sender, amountToWithdraw);
+        emit Withdrawn(owner, assets);
     }
 
 
@@ -652,7 +813,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
                 ,
 
             ) = feed.latestRoundData();
-            require(price > 0, "PoolV4: negative price");
+            require(price > 0, "PoolV5: negative price");
             twapSwaps = twapSwapsInfo(
                 action,
                 tokenIn,
@@ -675,7 +836,7 @@ contract PoolV4 is IPoolV4, ReentrancyGuard, AutomationCompatibleInterface, Owna
      */
     function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, address recipent) internal returns (uint256 amountOut) {
         
-        require (IERC20Metadata(tokenIn).balanceOf(address(this)) >= amountIn, "PoolV4: insufficient balance");
+        require (IERC20Metadata(tokenIn).balanceOf(address(this)) >= amountIn, "PoolV5: insufficient balance");
 
         if (amountIn > 0 && amountOutMin > 0) {
             // allow the router to spend the tokens

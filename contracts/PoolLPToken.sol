@@ -2,7 +2,7 @@
 pragma solidity ^0.8.14;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "./MinterRole.sol";
+import "./libraries/MinterRole.sol";
 
 /**
  * The LP Token for the Pool representing the share of the value of the Pool held by ther owner.

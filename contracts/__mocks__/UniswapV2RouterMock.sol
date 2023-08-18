@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "../swaps/IUniswapV2Router.sol";
-import "../TokenMaths.sol";
+import "../libraries/TokenMaths.sol";
 
 import "hardhat/console.sol";
 

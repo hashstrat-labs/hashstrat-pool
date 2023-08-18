@@ -5,7 +5,7 @@ import { BigNumber, Contract } from "ethers"
 import { ethers } from "hardhat";
 
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { deployMockContract } from "ethereum-waffle"
+import { deployMockContract } from "@ethereum-waffle/mock-contract"
 
 import { fromBtc, fromUsdc, fromWei, toUsdc, toWbtc, transferFunds } from "./helpers"
 

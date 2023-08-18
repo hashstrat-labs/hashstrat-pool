@@ -6,8 +6,8 @@ import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
 import "./IStrategy.sol";
-import "../IPoolV4.sol";
-import "../TokenMaths.sol";
+import "../interfaces/IPoolV4.sol";
+import "../libraries/TokenMaths.sol";
 
 /**
  * This strategy aims to buy/sell when the price moves far in either directions from a slow moving average of the price.

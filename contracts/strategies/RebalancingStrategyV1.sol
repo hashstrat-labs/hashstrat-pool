@@ -6,8 +6,8 @@ import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
 import "./IStrategy.sol";
-import "../IPoolV4.sol";
-import "../TokenMaths.sol";
+import "../interfaces/IPoolV4.sol";
+import "../libraries/TokenMaths.sol";
 
 /**
  * A simple rebalancing strategy for a 2 asset Pool.

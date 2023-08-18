@@ -11,7 +11,7 @@ import erc20_abi from "../scripts/abis/erc20.json";
 import addresses from "../conf/addresses.json";
 import enums from "../conf/enums.json";
 
-import { deployMockContract } from "ethereum-waffle"
+import { deployMockContract } from "@ethereum-waffle/mock-contract"
 
 import price_feed_aggreagator_abi from "./abi/price_feed_aggreagator.json"
 import pool_abi from "./abi/pool.json"

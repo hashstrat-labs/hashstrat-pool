@@ -2,7 +2,7 @@ import { expect } from "chai";
 import { Contract } from "ethers"
 import { ethers } from "hardhat";
 
-import { deployMockContract } from "ethereum-waffle"
+import { deployMockContract } from "@ethereum-waffle/mock-contract"
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { fromBtc, fromUsdc, toUsdc, toWbtc, transferFunds, waitDays, waitSeconds } from "./helpers"
 

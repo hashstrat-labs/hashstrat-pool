@@ -6,18 +6,16 @@ import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
 import "./IStrategy.sol";
-import "../IPoolV4.sol";
-import "../TokenMaths.sol";
+import "../interfaces/IPoolV4.sol";
+import "../libraries/TokenMaths.sol";
 
 
 /**
  * This strategy aims to follow the trend buying the risk asset when the price is above a predefined moving average
  * and selling into the stable asset when the price is below such moving average.
  * 
- * The strategy is configured with the following parameters:
+ * The strategy is configured with the following parameter:
  * - movingAveragePeriod: the period used to determine the average of the price.
- * - tokensToSwapPerc: the percentage of the risk/stable assets to BUY/SELL when the trade logic is triggered.
- * - minAllocationPerc: the minium percentage of the porfolio that should be allocated to both the stable and risk assets at all times.
  */
 
 

@@ -14,7 +14,7 @@ const config : HardhatUserConfig = {
   defaultNetwork: "hardhat",
 
   solidity: {
-    version: "0.8.17",
+    version: "0.8.14",
     settings: {
       optimizer: {
         enabled: true,
@@ -24,10 +24,10 @@ const config : HardhatUserConfig = {
   },
 
   paths: {
-    sources: './contracts',
-    tests: './test',
-    cache: './cache',
-    artifacts: './artifacts',
+    // sources: './contracts',
+    // tests: './test',
+    // cache: './cache',
+    // artifacts: './artifacts',
   },
 
   mocha: {
@@ -55,7 +55,7 @@ const config : HardhatUserConfig = {
     disambiguatePaths: false,
     runOnCompile: true,
     strict: true,
-    only: [':PoolV5$'],
+    only: [':PoolV5$', ':PoolV5Diamond$'],
   },
 
   networks: {

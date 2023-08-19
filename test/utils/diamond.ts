@@ -1,6 +1,6 @@
 /* global ethers */
 import { Contract } from "ethers"
-import { ethers } from "hardhat";
+import { ethers  } from "hardhat";
 
 import erc20_abi from "../../scripts/abis/erc20.json";
 import addresses from "../../conf/addresses.json";
@@ -106,16 +106,15 @@ export async function deployPoolDiamondContract() {
 
     const [contractOwner] = await ethers.getSigners();
 
+    // deploy DiamondCut facet
     const DiamondCutFacet = await ethers.getContractFactory('DiamondCutFacet')
     const diamondCutFacet = await DiamondCutFacet.deploy()
 
-    // deploy simple Diamond
+    // deploy Pool Diamond
     const PoolV5Diamond = await ethers.getContractFactory('PoolV5Diamond')
-
     const pool = await PoolV5Diamond.deploy(contractOwner.address, diamondCutFacet.address)
     await pool.deployed()
-
-    console.log('PoolV5Diamond deployed:', pool.address)
+    console.log('PoolV5Diamond deployed at ', pool.address)
 
 
     // deploy DiamondInit
@@ -134,7 +133,6 @@ export async function deployPoolDiamondContract() {
         'DiamondLoupeFacet',
         'OwnershipFacet'
     ]
-
     
     const cut = []
     for (const FacetName of FacetNames) {
@@ -156,8 +154,23 @@ export async function deployPoolDiamondContract() {
     // Get interface of IDiamondCut for the Diamond deploed at the Pool address
     const diamondCut = await ethers.getContractAt('IDiamondCut', pool.address)
     
-    // call to init function
+    // call to init function, pass Pool init params
+	// const poolFees = 100        // 1% fee
+	// const uniswapV3Fee = 3000
+
+    // const args = {
+    //     name: "HashStrat TrendFollowing 01",
+    //     symbol: "HSBTCTF01",
+    //     stableAssetAddress: addresses.polygon.usdc,
+    //     riskAssetAddress: addresses.polygon.wbtc,
+    //     stableAssetFeedAddress: addresses.polygon.usdc_usd_aggregator,
+    //     riskAssetFeedAddress: addresses.polygon.wbtc_usd_aggregator,
+    //     poolFees: poolFees,
+    //     uniswapV3Fee: uniswapV3Fee,
+    // }
+
     let functionCall = diamondInit.interface.encodeFunctionData('init')
+
     const tx = await diamondCut.diamondCut(cut, diamondInit.address, functionCall)
     console.log('Diamond cut tx: ', tx.hash)
     
@@ -173,11 +186,17 @@ export async function deployPoolDiamondContract() {
 }
 
 
-export async function performDiamondCut(pool: Contract, diamondInit: Contract, FacetNames: string[]) {
+export async function performDiamondCut(
+        pool: Contract, 
+        FacetName: string,
+        args? : any | undefined,
+    ) {
 
-     console.log('Deploying facets', FacetNames)
+     console.log('Deploying facet: ', FacetName)
      const cut = []
-     for (const FacetName of FacetNames) {
+
+
+    //  for (const FacetName of FacetNames) {
          const Facet = await ethers.getContractFactory(FacetName)
          const facet = await Facet.deploy()
          await facet.deployed()
@@ -187,7 +206,7 @@ export async function performDiamondCut(pool: Contract, diamondInit: Contract, F
              action: FacetCutAction.Add,
              functionSelectors: getSelectors(facet)
          })
-     }
+    //  }
  
      // upgrade diamond with facet
      console.log('Diamond Cut:', cut)
@@ -196,9 +215,17 @@ export async function performDiamondCut(pool: Contract, diamondInit: Contract, F
     const diamondCut = await ethers.getContractAt('IDiamondCut', pool.address)
     
     // call to init function
-    let functionCall = diamondInit.interface.encodeFunctionData('init')
-    console.log(">>> functionCall: ", functionCall)
-    const tx = await diamondCut.diamondCut(cut, diamondInit.address, functionCall)
+
+    let functionCallInit = args === undefined ? 
+        facet.interface.encodeFunctionData('init') : 
+        facet.interface.encodeFunctionData('init', [args]);
+
+    const initContractAddr = args !== undefined ? facet.address : ethers.constants.AddressZero 
+
+
+    console.log(">>> init - functionCall: ", functionCallInit, "init address: ", initContractAddr)
+
+    const tx = await diamondCut.diamondCut(cut, initContractAddr, functionCallInit)
     console.log('Diamond cut tx: ', tx.hash)
     
     const receipt = await tx.wait()

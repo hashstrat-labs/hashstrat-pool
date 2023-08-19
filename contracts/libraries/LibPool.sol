@@ -51,7 +51,7 @@ library LibPool {
         ds._riskAsset = asset;
     }
 
-    function seStableAsset(address asset) internal {
+    function setStableAsset(address asset) internal {
         require(asset != address(0), "POOL: invalid address");
 
         Storage storage ds = getStorage();

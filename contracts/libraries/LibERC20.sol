@@ -23,6 +23,9 @@ library LibERC20 {
      * @notice ERC20 storage for the ERC20 facet
      */
     struct Storage {
+        string _name;
+        string _symbol;
+        uint8 _decimals;
         uint256 _totalSupply;
         mapping(address => uint256) _balances;
         mapping(address => mapping(address => uint256)) _allowances;
@@ -38,6 +41,25 @@ library LibERC20 {
 
     event Approval(address indexed owner, address indexed spender, uint256 value);
     event Transfer(address indexed from, address indexed to, uint256 value);
+
+    function erc20SetName(string memory name) internal {
+        Storage storage ds = getStorage();
+        ds._name = name;
+    }
+
+
+    function erc20SetSymbol(string memory symbol) internal {
+        Storage storage ds = getStorage();
+        ds._symbol = symbol;
+    }
+
+
+    function erc20SetDecimal(uint8 decimals) internal {
+        Storage storage ds = getStorage();
+        ds._decimals = decimals;
+    }
+
+
 
     // @dev due to function naming clashes in the diamond we need to implement our own "namespace" here and prepend "erc20".
     function erc20mint(address account, uint256 amount) internal {
@@ -102,8 +124,19 @@ library LibERC20 {
         return ds._totalSupply;
     }
 
-    function erc20decimals() internal pure returns (uint8) {
-        return 18;
+    function erc20decimals() internal view returns (uint8) {
+        Storage storage ds = getStorage();
+        return ds._decimals;
+    }
+
+    function erc20name() internal view returns (string memory) {
+        Storage storage ds = getStorage();
+        return ds._name;
+    }
+
+    function erc20symbol() internal view returns (string memory) {
+        Storage storage ds = getStorage();
+        return ds._symbol;
     }
 
     
@@ -209,3 +242,4 @@ library LibERC20 {
         uint256 amount
     ) internal {}
 }
+

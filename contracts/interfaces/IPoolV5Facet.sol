@@ -9,10 +9,15 @@ pragma solidity ^0.8.14;
 
 interface IPoolV5Facet {
 
-    function initialize(
-        address riskAsset
-    ) external;
+   struct PoolArgs {
+        address stableAssetAddress;
+        address riskAssetAddress;
+        address stableAssetFeedAddress;
+        address riskAssetFeedAddress;
+        uint256 poolFees;
+        uint24 uniswapV3Fee;
+    }
 
+    function init(PoolArgs memory args) external;
 
-  
 }

@@ -14,6 +14,33 @@ import { LibDiamond } from "../diamond/libraries/LibDiamond.sol";
  */
 contract ERC20Facet {
 
+
+   struct ERC20Args {
+        string symbol;
+        string name;
+        uint8 decimals;
+    }
+
+    function init(ERC20Args memory args) external {
+        LibDiamond.enforceIsContractOwner();
+        
+        LibERC20.erc20SetSymbol(args.symbol);
+        LibERC20.erc20SetName(args.name);
+        LibERC20.erc20SetDecimal(args.decimals);
+    }
+
+    function name() external view returns (string memory) {
+        return LibERC20.erc20name();
+    }
+
+    function symbol() external view returns (string memory) {
+        return LibERC20.erc20symbol();
+    }
+
+    function decimals() external view returns (uint8) {
+        return LibERC20.erc20decimals();
+    }
+
     function totalSupply() external view returns (uint256) {
         return LibERC20.erc20totalSupply();
     }

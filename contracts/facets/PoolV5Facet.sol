@@ -10,22 +10,21 @@ import { IPoolV5Facet } from "../interfaces/IPoolV5Facet.sol";
 import { IPoolV5 } from "../interfaces/IPoolV5.sol";
 import { LibDiamond } from "../diamond/libraries/LibDiamond.sol";
 import { LibPool } from "../libraries/LibPool.sol";
-
+import { LibERC4626 } from "../libraries/LibERC4626.sol";
 
 
 // Remember to add the loupe functions from DiamondLoupeFacet to the diamond.
 // The loupe functions are required by the EIP2535 Diamonds standard
 //TODO implement IPoolV5
 contract PoolV5Facet is IPoolV5Facet /*, IPoolV5 */ {
-    /// @notice Add/replace/remove any number of functions and optionally execute
-    ///         a function with delegatecall
-    /// @param _riskAsset the address of the risk asset
-    ///
-    function initialize(
-        address _riskAsset
-    ) external override {
+
+    function init(IPoolV5Facet.PoolArgs memory args) public {
         LibDiamond.enforceIsContractOwner();
-        LibPool.setRiskAsset(_riskAsset);
+
+        LibPool.setStableAsset(args.stableAssetAddress);
+        LibPool.setRiskAsset(args.riskAssetAddress);
+        LibPool.setStableAssetFeed(args.stableAssetFeedAddress);
+        LibPool.setRiskAssetFeed(args.riskAssetFeedAddress);
     }
 
 
@@ -40,11 +39,13 @@ contract PoolV5Facet is IPoolV5Facet /*, IPoolV5 */ {
     }
 
     function stableAssetValue() external view returns(uint) {
-         return LibPool.stableAssetsValue();
+        return LibPool.stableAssetsValue();
     }
 
 
     function lpTokensValue (uint lpTokens) external view returns (uint) {
+
+        return LibPool.stableAssetsValue();
 
     }
 

@@ -16,7 +16,7 @@ import { transferFunds, toUsdc } from "./helpers"
 
 import erc20_abi from "./abi/erc20.json"
 import erc4626_abi from "../abi/ERC4626Facet.json"
-
+import addresses from "../conf/addresses.json";
 
 // // HELPER: get function selectors from a contract
 // function getSelectors (contract: Contract) {
@@ -45,12 +45,33 @@ describe('Create a PoolV5 Diamond', async function () {
 
     const [ deployer, user0, user1 ] = await ethers.getSigners();
 
-    const amount = toUsdc('1000') 
-    await transferFunds(amount, user0.address)
+  
+    await transferFunds( toUsdc('1000'), user0.address)
 
     // deploy ERC20 facet
-    const FacetNames = [ 'ERC20Facet', 'ERC4626Facet', 'PoolV5Facet' ]
-    await performDiamondCut(pool, diamondInit, FacetNames);
+
+    // 'ERC4626Facet', 'PoolV5Facet' 
+ 
+    await performDiamondCut(pool, 'ERC20Facet',  {
+        symbol: "HSBTCTF01",
+        name: "HashStrat TrendFollowing 01",
+        decimals: 18,
+    });
+
+
+    // address stableAssetAddress;
+   
+    await performDiamondCut(pool, 'PoolV5Facet', {
+        stableAssetAddress: addresses.polygon.usdc,
+        riskAssetAddress: addresses.polygon.wbtc,
+        stableAssetFeedAddress: addresses.polygon.usdc_usd_aggregator,
+        riskAssetFeedAddress: addresses.polygon.wbtc_usd_aggregator,
+        poolFees: 100,      // 1% fee
+        uniswapV3Fee: 3000,
+    });
+
+    await performDiamondCut(pool, 'ERC4626Facet');
+
 
     // Now can interact with the Pool via its ERC20 interface
     const poolErc20Facet = new Contract(pool.address, erc20_abi, ethers.provider)
@@ -61,31 +82,13 @@ describe('Create a PoolV5 Diamond', async function () {
     // And it's ERC4626 Tokenized Vault Standard facet
     const poolErc4626Facet = new Contract(pool.address, erc4626_abi, ethers.provider)
 
-    await usdc.connect(user0).approve(pool.address, amount)
-    await poolErc4626Facet.connect(user0).deposit(amount, user0.address) 
+    const deposit = toUsdc('200') 
+    await usdc.connect(user0).approve(pool.address, deposit)
+    await poolErc4626Facet.connect(user0).deposit(deposit, user0.address) 
 
     console.log(">>> totalSupply:", await poolErc20Facet.totalSupply() )
     console.log(">>> LP balance of user0:", await poolErc20Facet.balanceOf(user0.address) )
     console.log(">>> UDSC balance of user0:", await usdc.balanceOf(user0.address) )
-  
-
-    // // now we have the ERC20Facet deployed
-
-    // // get all the function selectors covered by this facet - we need that during the cut below:
-    // const selectors = getSelectors(erc20Facet)
-
-    // // now make the diamond cut (register the facet) - cut the NFT Facet onto the diamond:
-    // const tx = await pool.diamondCut(
-    //   {
-    //     facetAddress: erc20Facet.address, // the nft facet is deployed here
-    //     functionSelectors: selectors // these are the selectors of this facet (the functions that are supported)
-    //   }, { gasLimit: 800000 }
-    // )
-
-    // const receipt = await tx.wait()
-    // if (!receipt.status) {
-    //   throw Error(`Diamond upgrade failed: ${tx.hash}`)
-    // }
 
 
   })

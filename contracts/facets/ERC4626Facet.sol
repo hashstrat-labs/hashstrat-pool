@@ -5,12 +5,13 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
-
 import { IERC4626 } from "../interfaces/IERC4626.sol";
 import { LibERC4626 } from  "../libraries/LibERC4626.sol";
 import { LibPool } from "../libraries/LibPool.sol";
 import { LibERC20 } from  "../libraries/LibERC20.sol";
 import { TokenMaths } from "../libraries/TokenMaths.sol";
+
+import "hardhat/console.sol";
 
 /**
  * @notice the ERC20 Token Facet contract which will be registered with the Diamond contract as its facet.
@@ -20,6 +21,11 @@ contract ERC4626Facet is IERC4626 {
 
     using TokenMaths for uint256;
     
+
+    function init() public {
+        console.log(">>> ERC4626Facet.init");
+    }
+
 
     /// @notice The address of the underlying token used for the Vault for accounting, depositing, and withdrawing.
     function asseet() external view returns (address assetTokenAddress) {
@@ -75,7 +81,8 @@ contract ERC4626Facet is IERC4626 {
     /// @notice Mints shares Vault shares to receiver by depositing exactly assets of underlying tokens.
     /// @dev stateMutability: nonpayable
     function deposit(uint256 assets, address receiver) external returns(uint256 shares) {
-         return _deposit(assets, receiver);
+        console.log(">>> deposit - assets:", assets, "receiver: ", receiver);
+        return _deposit(assets, receiver);
     }
 
 
@@ -85,7 +92,7 @@ contract ERC4626Facet is IERC4626 {
     }
 
 
-//////////  TODO  ////////// 
+    //////////  TODO  ////////// 
 
   
 
@@ -152,7 +159,6 @@ contract ERC4626Facet is IERC4626 {
         IERC20 depositToken = IERC20(LibPool.stableAsset());
         require(depositToken.allowance(msg.sender, address(this)) >= assets, "PoolV5: Insufficient allowance");
 
-    
 
         // 0. Get the total assets before receiving the deposit
         uint assetsBefore = totalAssets();

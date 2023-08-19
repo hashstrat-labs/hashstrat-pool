@@ -11,6 +11,9 @@
     "chain": "npx hardhat node",
     "flatten": "npx hardhat flatten",
     "test": "npx hardhat test",
+    "testv5": "npx hardhat test test/poolv5_diamond_tests",
+
+
     "deploy:polygon": "npx hardhat run --network polygon scripts/deploy-polygon.ts",
     "verify:polygon": "npx hardhat verify --network polygon <POOL_ADDR> <PARAMS>",
     "run-get-tx-count": "npx hardhat run --network polygon scripts/get-tx-count.ts",

@@ -35,10 +35,12 @@ const config : HardhatUserConfig = {
   },
 
   abiExporter: {
-    path: './build/abi',
+    path: './abi',
+    runOnCompile: true,
     clear: true,
     flat: true,
     spacing: 2,
+    pretty: true,
   },
 
   gasReporter: {

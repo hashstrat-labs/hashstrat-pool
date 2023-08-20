@@ -6,6 +6,8 @@ import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
 import { IERC4626 } from "../interfaces/IERC4626.sol";
+
+import { LibDiamond } from "../diamond/libraries/LibDiamond.sol";
 import { LibERC4626 } from  "../libraries/LibERC4626.sol";
 import { LibPool } from "../libraries/LibPool.sol";
 import { LibERC20 } from  "../libraries/LibERC20.sol";
@@ -22,8 +24,8 @@ contract ERC4626Facet is IERC4626 {
     using TokenMaths for uint256;
     
 
-    function init() public {
-        console.log(">>> ERC4626Facet.init");
+    function init() external {
+        LibDiamond.enforceIsContractOwner();
     }
 
 

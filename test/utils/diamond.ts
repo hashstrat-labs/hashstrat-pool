@@ -9,6 +9,47 @@ import addresses from "../../conf/addresses.json";
 export const FacetCutAction = { Add: 0, Replace: 1, Remove: 2 }
 
 
+class SelectorArray extends Array<string> {
+    
+    contract: Contract;
+
+    constructor(contract: Contract) {
+        super();
+        this.contract = contract
+    }
+
+    // used with getSelectors to get selectors from an array of selectors
+    // functionNames argument is an array of function signatures
+    get (functionNames: string[]) {
+
+        const selectors = this.filter((v) => {
+            for (const functionName of functionNames) {
+                if (v === this.contract.interface.getSighash(functionName)) {
+                    return true
+                }
+            }
+            return false
+        })
+        return selectors
+    }
+
+    // used to remove some selectors from the contract
+    // functionNames is an array of function signatures identifying the functions to be removed 
+    remove(functionNames: string[]) {
+        const selectors = this.filter((v) => {
+        for (const functionName of functionNames) {
+              if (v === this.contract.interface.getSighash(functionName)) {
+                return false
+              }
+            }
+            return true
+        })
+
+        return selectors;
+    }
+}
+
+
 
 // get function selectors from ABI
 export function getSelectors (contract: Contract) {
@@ -19,10 +60,7 @@ export function getSelectors (contract: Contract) {
         acc.push(contract.interface.getSighash(val))
     }
     return acc
-  }, [] as string[])
-
-
-  console.log(">> getSelectors: ", selectors)
+  }, new SelectorArray(contract))
 
 //   selectors.contract = contract
 //   selectors.remove = remove
@@ -36,22 +74,7 @@ export function getSelector (func: string) {
   return abiInterface.getSighash(ethers.utils.Fragment.from(func))
 }
 
-// used with getSelectors to remove selectors from an array of selectors
-// functionNames argument is an array of function signatures
-// function remove (functionNames) {
-//   const selectors = this.filter((v) => {
-//     for (const functionName of functionNames) {
-//       if (v === this.contract.interface.getSighash(functionName)) {
-//         return false
-//       }
-//     }
-//     return true
-//   })
-//   selectors.contract = this.contract
-//   selectors.remove = this.remove
-//   selectors.get = this.get
-//   return selectors
-// }
+
 
 // used with getSelectors to get selectors from an array of selectors
 // functionNames argument is an array of function signatures
@@ -88,6 +111,9 @@ export function getSelector (func: string) {
 // }
 
 
+// exports.removeSelectors = removeSelectors
+// exports.findAddressPositionInFacets = findAddressPositionInFacets
+
 
 // exports.getSelectors = getSelectors
 // exports.getSelector = getSelector
@@ -114,9 +140,40 @@ export async function deployPoolDiamondContract() {
     const PoolV5Diamond = await ethers.getContractFactory('PoolV5Diamond')
     const pool = await PoolV5Diamond.deploy(contractOwner.address, diamondCutFacet.address)
     await pool.deployed()
-    console.log('PoolV5Diamond deployed at ', pool.address)
+    console.log('PoolV5Diamond deployed at ', pool.address, "owner:", contractOwner.address)
 
 
+    const [diamondLoupeFacet, ownershipFacet] = await initializeDiamondWithFacets(pool, [
+        'DiamondLoupeFacet',
+        'OwnershipFacet'
+    ]);
+
+    // deploy ERC20 facet
+    const erc20Facet = await performDiamondCut(pool, 'ERC20Facet',  {
+        symbol: "HSBTCTF01",
+        name: "HashStrat TrendFollowing 01",
+        decimals: 18,
+    });
+
+    // deploy PoolV5 facet
+    const poolV5Facet = await performDiamondCut(pool, 'PoolV5Facet', {
+        stableAssetAddress: addresses.polygon.usdc,
+        riskAssetAddress: addresses.polygon.wbtc,
+        stableAssetFeedAddress: addresses.polygon.usdc_usd_aggregator,
+        riskAssetFeedAddress: addresses.polygon.wbtc_usd_aggregator,
+        poolFees: 100,      // 1% fee
+        uniswapV3Fee: 3000,
+    });
+
+    const usdc = new Contract(addresses.polygon.usdc, erc20_abi, ethers.provider)
+
+    return { pool, diamondCutFacet, diamondLoupeFacet, erc20Facet, poolV5Facet, usdc };
+}
+
+
+export async function initializeDiamondWithFacets(pool: Contract, FacetNames: string[]) {
+
+    console.log('Initialize diamond with facets: ', FacetNames)
     // deploy DiamondInit
     // DiamondInit provides a function that is called when the diamond is upgraded to initialize state variables
     // Read about how the diamondCut function works here: https://eips.ethereum.org/EIPS/eip-2535#addingreplacingremoving-functions
@@ -125,50 +182,29 @@ export async function deployPoolDiamondContract() {
     await diamondInit.deployed()
     console.log('DiamondInit deployed:', diamondInit.address)
 
+    let deployedFacets = []
 
-    // deploy facets
-    console.log('')
-    console.log('Deploying facets')
-    const FacetNames = [
-        'DiamondLoupeFacet',
-        'OwnershipFacet'
-    ]
-    
     const cut = []
     for (const FacetName of FacetNames) {
         const Facet = await ethers.getContractFactory(FacetName)
         const facet = await Facet.deploy()
         await facet.deployed()
         console.log(`${FacetName} deployed: ${facet.address}`)
+
         cut.push({
             facetAddress: facet.address,
             action: FacetCutAction.Add,
             functionSelectors: getSelectors(facet)
         })
+
+        deployedFacets.push(facet);
     }
 
     // upgrade diamond with facets
-    console.log('')
-    console.log('Diamond Cut:', cut)
+    // console.log('Diamond Cut:', cut)
 
     // Get interface of IDiamondCut for the Diamond deploed at the Pool address
     const diamondCut = await ethers.getContractAt('IDiamondCut', pool.address)
-    
-    // call to init function, pass Pool init params
-	// const poolFees = 100        // 1% fee
-	// const uniswapV3Fee = 3000
-
-    // const args = {
-    //     name: "HashStrat TrendFollowing 01",
-    //     symbol: "HSBTCTF01",
-    //     stableAssetAddress: addresses.polygon.usdc,
-    //     riskAssetAddress: addresses.polygon.wbtc,
-    //     stableAssetFeedAddress: addresses.polygon.usdc_usd_aggregator,
-    //     riskAssetFeedAddress: addresses.polygon.wbtc_usd_aggregator,
-    //     poolFees: poolFees,
-    //     uniswapV3Fee: uniswapV3Fee,
-    // }
-
     let functionCall = diamondInit.interface.encodeFunctionData('init')
 
     const tx = await diamondCut.diamondCut(cut, diamondInit.address, functionCall)
@@ -178,11 +214,9 @@ export async function deployPoolDiamondContract() {
     if (!receipt.status) {
         throw Error(`Diamond upgrade failed: ${tx.hash}`)
     }
-    console.log('Completed diamond cut')
+    console.log('Completed diamond init')
 
-    const usdc = new Contract(addresses.polygon.usdc, erc20_abi, ethers.provider)
-
-    return { pool, diamondInit, usdc };
+    return deployedFacets;
 }
 
 
@@ -192,24 +226,21 @@ export async function performDiamondCut(
         args? : any | undefined,
     ) {
 
-     console.log('Deploying facet: ', FacetName)
-     const cut = []
+    console.log('Deploying facet: ', FacetName)
+    const cut = []
 
-
-    //  for (const FacetName of FacetNames) {
-         const Facet = await ethers.getContractFactory(FacetName)
-         const facet = await Facet.deploy()
-         await facet.deployed()
-         console.log(`Facet ${FacetName} deployed at ${facet.address}`)
-         cut.push({
-             facetAddress: facet.address,
-             action: FacetCutAction.Add,
-             functionSelectors: getSelectors(facet)
-         })
-    //  }
+    const Facet = await ethers.getContractFactory(FacetName)
+    const facet = await Facet.deploy()
+    await facet.deployed()
+    console.log(`Facet ${FacetName} deployed at ${facet.address}`)
+    cut.push({
+        facetAddress: facet.address,
+        action: FacetCutAction.Add,
+        functionSelectors: getSelectors(facet)
+    })
  
      // upgrade diamond with facet
-     console.log('Diamond Cut:', cut)
+    //  console.log('Diamond Cut:', cut)
 
     // Get interface of IDiamondCut for the Diamond deploed at the Pool address
     const diamondCut = await ethers.getContractAt('IDiamondCut', pool.address)
@@ -222,8 +253,7 @@ export async function performDiamondCut(
 
     const initContractAddr = args !== undefined ? facet.address : ethers.constants.AddressZero 
 
-
-    console.log(">>> init - functionCall: ", functionCallInit, "init address: ", initContractAddr)
+    // console.log(">>> init - functionCall: ", functionCallInit, "init address: ", initContractAddr)
 
     const tx = await diamondCut.diamondCut(cut, initContractAddr, functionCallInit)
     console.log('Diamond cut tx: ', tx.hash)
@@ -233,4 +263,6 @@ export async function performDiamondCut(
         throw Error(`Diamond upgrade failed: ${tx.hash}`)
     }
     console.log('Completed diamond cut - receipt status: ', receipt.status)
+
+    return facet;
 }

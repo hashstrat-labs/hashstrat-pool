@@ -150,8 +150,10 @@ describe("PoolV4", function () {
 		});
         
 
-        it("Process the TWAP swap, chunk by chunk, to the max of 256 swaps", async function () {
-			const { pool, strategy, usdc, wbtc, usdcAggregatorMock, wbtcAggregatorMock } = await loadFixture(deployPoolContract);
+        it.only("Process the TWAP swap, chunk by chunk, to the max of 256 swaps", async function () {
+			const { pool, strategy,usdcAggregatorMock, wbtcAggregatorMock } = await loadFixture(deployPoolContract);
+            const [ _, user ] = await ethers.getSigners();
+
             const twapInterval = (await pool.twapSwapInterval()).toNumber()
 
             // BTC at $20k 
@@ -166,14 +168,14 @@ describe("PoolV4", function () {
             const poolUsdc = toUsdc(10_000)
             await transferFunds(poolUsdc, pool.address, "usdc")
     
-            await waitSeconds( 5 * 24 * 60 * 60)
+            await waitSeconds( 5 * 24 * 60 * 60 )
 
             expect( (await pool.checkUpkeep(new Int8Array())).upkeepNeeded ).is.true
-
             expect( await strategy.shouldPerformUpkeep() ).is.true
 
-            // expect the twap size processed to be the 1/256 of the original size 20_000
+            // expeced size of twap swap processed is 1/256 of the original size 10_000
             const expectedTwapChunk = poolUsdc.div(256) 
+            // expectwd amount of BTC bought ar evey iteration
             const expectedBought = expectedTwapChunk.mul(10 ** 2).div(20_000)
 
             for (let i=1; i <= 255; i++) {
@@ -181,9 +183,12 @@ describe("PoolV4", function () {
                 await waitSeconds(twapInterval)
                 expect( (await pool.checkUpkeep(new Int8Array())).upkeepNeeded ).is.true
                 
-                await pool.performUpkeep(new Int8Array())
-
+                // await pool.connect(user).performUpkeep(new Int8Array())
+                const tx = await pool.connect(user).performUpkeep(new Int8Array())
+                const gasUsed = (await tx.wait()).gasUsed
                 const swapInfo = await pool.twapSwaps()
+                console.log(i, ">> performUpkeep - gasUsed gas:", gasUsed.toString(), ", sold:" , swapInfo.sold.toString() ) 
+
                 expect( swapInfo.side ).is.equal(enums.ActionType.BUY)
                 expect( swapInfo.total ).is.equal( poolUsdc )
                 expect( swapInfo.size ).is.equal( expectedTwapChunk )
@@ -194,21 +199,22 @@ describe("PoolV4", function () {
             }
 
             // execute last twap swap and verity the whole swap was completed 
-            await pool.performUpkeep(new Int8Array())
+            await pool.connect(user).performUpkeep(new Int8Array())
             const swapInfo = await pool.twapSwaps()
-            const boughtTotal = poolUsdc.mul(100).div(20_000)
+            const expectedBtcBought = poolUsdc.mul(100).div(20_000)
 
             expect( swapInfo.size ).is.equal( expectedTwapChunk )
             expect( swapInfo.sold ).is.equal( poolUsdc )
             expect( swapInfo.sold ).is.equal( swapInfo.total )
-            expect( fromBtc(swapInfo.bought) ).is.approximately(fromBtc( boughtTotal ), 0.00001)
+            expect( fromBtc(swapInfo.bought) ).is.approximately(fromBtc( expectedBtcBought ), 0.00001)
 		});
 
 
 
         it("Exec next TWAP swaps after the min time has elapsed", async function () {
 
-            const { pool, strategy, usdc, wbtc, usdcAggregatorMock, wbtcAggregatorMock } = await loadFixture(deployPoolContract);
+            const { pool, usdc, usdcAggregatorMock, wbtcAggregatorMock } = await loadFixture(deployPoolContract);
+            const [ _, addr1, addr2 ] = await ethers.getSigners();
 
             // BTC at $20k 
             await usdcAggregatorMock.mock.latestRoundData.returns(0, 100000000, 1801686057, 1801686057, 0);
@@ -224,7 +230,7 @@ describe("PoolV4", function () {
             expect( swapTs0 ).is.equal( 0 )
 
             // depoist should trigger the first twap swap
-            const [ _, addr1 ] = await ethers.getSigners();
+           
             const deposit = 10_000 * 10 ** 6
             await transferFunds(deposit, addr1.address)
             await usdc.connect(addr1).approve(pool.address, deposit)
@@ -247,7 +253,7 @@ describe("PoolV4", function () {
             expect( (await pool.checkUpkeep(new Int8Array())).upkeepNeeded ).is.true
 
             // perform upkeep
-            await pool.performUpkeep(new Int8Array())
+            await pool.connect(addr2).performUpkeep(new Int8Array())
             swapInfo = await pool.twapSwaps()
             const ts2 = swapInfo.lastSwapTimestamp
             const bought2 = swapInfo.bought
@@ -267,7 +273,7 @@ describe("PoolV4", function () {
             await waitSeconds( twapInterval / 2 )
             expect( (await pool.checkUpkeep(new Int8Array())).upkeepNeeded ).is.true
 
-            await pool.performUpkeep(new Int8Array())
+            await pool.connect(user).performUpkeep(new Int8Array())
             swapInfo = await pool.twapSwaps()
             const ts3 = swapInfo.lastSwapTimestamp
             const bought3 = swapInfo.bought

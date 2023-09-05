@@ -57,7 +57,7 @@ describe("MeanReversionV1", function () {
         await usdcAggregatorMock.mock.decimals.returns( 8 ); 
 
         await wbtcAggregatorMock.mock.latestRoundData.returns( 0, 2000000000000, 1801686057, 1801686057, 0 ); 
-        await wbtcAggregatorMock.mock.decimals.returns( 8 ); 
+        await wbtcAggregatorMock.mock.decimals.returns( 8 );
 
 		return { strategy, usdc, wbtc, usdcAggregatorMock, wbtcAggregatorMock, poolMock };
 	}

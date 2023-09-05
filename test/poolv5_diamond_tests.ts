@@ -4,43 +4,23 @@ Tests the PoolV5 diamond and facets.
 @author: Carlo Pascoli
 ============================================================================================= */
 
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { expect } from "chai";
-import { BigNumber, Contract } from "ethers"
+
 import { ethers } from "hardhat";
+import { Contract } from "ethers"
+import { expect } from "chai";
+
+import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 
 import { getSelectors, FacetCutAction, deployPoolDiamondContract, performDiamondCut } from './utils/diamond'
-
 import { transferFunds, toUsdc, toWei } from "./helpers"
-
-
 import erc20_abi from "./abi/erc20.json"
 import erc4626_abi from "../abi/ERC4626Facet.json"
 import addresses from "../conf/addresses.json";
-
-// // HELPER: get function selectors from a contract
-// function getSelectors (contract: Contract) {
-
-//   // get the function signatures from the ABI of the contract:
-//   const signatures = Object.keys(contract.interface.functions)
-
-//   console.log(">>> ERC20 Facet function signatures: ", signatures)
-
-//   // convert from signature to selector:
-//   const selectors = signatures.reduce((acc, val) => {
-//     acc.push(contract.interface.getSighash(val))
-//     return acc
-//   }, [] as string[])
-//   return selectors
-// }
-
-
 
 
 describe('Create a PoolV5 Diamond', async function () {
 
     it('should have the ERC20 facet', async () => {
-
         const { pool, usdc } = await loadFixture(deployPoolDiamondContract);
         const [user0] = await ethers.getSigners();
 

@@ -9,13 +9,12 @@ import { LibDiamond } from "../diamond/libraries/LibDiamond.sol";
 // LibERC20
 
 /**
- * @notice the ERC20 Token Facet contract which will be registered with the Diamond contract as its facet.
- * @author Jesper Kristensen
+ * @notice the ERC20 interface of a Pool that represent its LP tokens.
+ * @author Carlo Pascoli
  */
 contract ERC20Facet {
 
-
-   struct ERC20Args {
+    struct ERC20Args {
         string symbol;
         string name;
         uint8 decimals;
@@ -23,7 +22,7 @@ contract ERC20Facet {
 
     function init(ERC20Args memory args) external {
         LibDiamond.enforceIsContractOwner();
-        
+
         LibERC20.erc20SetSymbol(args.symbol);
         LibERC20.erc20SetName(args.name);
         LibERC20.erc20SetDecimal(args.decimals);

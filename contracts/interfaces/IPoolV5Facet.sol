@@ -14,8 +14,7 @@ interface IPoolV5Facet {
         address riskAssetAddress;
         address stableAssetFeedAddress;
         address riskAssetFeedAddress;
-        uint256 poolFees;
-        uint24 uniswapV3Fee;
+        address daoTokenFarmAddress;
     }
 
     function init(PoolArgs memory args) external;

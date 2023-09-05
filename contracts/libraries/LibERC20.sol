@@ -1,22 +1,9 @@
 /// SPDX-License-Identifier: MIT
 pragma solidity 0.8.14;
 
-// import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/**
- * @notice The lobrary files supporting the ERC20 Facet of the Diamond.
- * The following are the ERC20 functions from the OZ implementation.
- * @author Jesper Kristensen - but copied from the OZ implementation and modified to be used as a facet
- */
 library LibERC20 {
-    /***************************************************************************************
-               Library to support the ERC20 Facet (contracts/facets/ERC20Facet.sol)
-    ****************************************************************************************/
-    
-    /** ==================================================================
-                            ERC20 Storage Space
-    =====================================================================*/
-    // each facet gets their own struct to store state into
+
     bytes32 constant ERC20_STORAGE_POSITION = keccak256("facet.erc20.diamond.storage");
 
     /**

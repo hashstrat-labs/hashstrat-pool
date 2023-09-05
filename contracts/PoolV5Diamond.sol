@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.14;
 
+import "@chainlink/contracts/src/v0.8/interfaces/AutomationCompatibleInterface.sol";
+
 import { LibDiamond } from "./diamond/libraries/LibDiamond.sol";
 import { IDiamondCut } from "./diamond/interfaces/IDiamondCut.sol";
-
-import "hardhat/console.sol";
+import { LibAutomation } from "./libraries/LibAutomation.sol";
 
 
 /**
@@ -25,9 +26,7 @@ import "hardhat/console.sol";
  * Large swaps are broken into up to 256 smaller chunks and executed over a period of time to reduce slippage.
  */
 
-
-
-contract PoolV5Diamond {    
+contract PoolV5Diamond is AutomationCompatibleInterface {    
 
     constructor(address _contractOwner, address _diamondCutFacet) payable {        
         LibDiamond.setContractOwner(_contractOwner);
@@ -43,6 +42,18 @@ contract PoolV5Diamond {
         });
         LibDiamond.diamondCut(cut, address(0), "");        
     }
+
+
+    //// implement the AutomationCompatibleInterface ////
+
+    function checkUpkeep(bytes calldata /* checkData */) external view override returns (bool upkeepNeeded, bytes memory performData) {
+        upkeepNeeded = LibAutomation.checkUpkeep();
+    }
+
+    function performUpkeep(bytes calldata /* performData */) external override {
+        LibAutomation.performUpkeep();
+    }
+
 
     // Find facet for function that is called and execute the
     // function if a facet is found and return any value.

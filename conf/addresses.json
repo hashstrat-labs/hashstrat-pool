@@ -16,7 +16,9 @@
         "usdc_usd_aggregator": "0xfE4A8cc5b5B2366C1B58Bea3858e81843581b2F7",
 
         "usd_holder": "0xe7804c37c13166ff0b37f5ae0bb07a3aebb6e245",
-        "btc_holder": "0xBA12222222228d8Ba445958a75a0704d566BF2C8"
+        "btc_holder": "0xBA12222222228d8Ba445958a75a0704d566BF2C8",
+
+        "swap_router": "0xBfE6690a8a9B5a0212bDb412E9dbAc4580818E1B"
     }
 }
 
